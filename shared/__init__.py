@@ -89,29 +89,32 @@ from .schemas import (
     BaseSchema,
     ResponseSchema,
     PaginationSchema,
-    
+
     # Пользовательские схемы
     UserSchema,
     UserCreateSchema,
     UserUpdateSchema,
     UserStatsSchema,
-    
-    # Схемы загрузок
-    DownloadSchema,
-    DownloadTaskSchema,
+    UserPreferencesSchema,  # ПРОВЕРИТЬ ЕСТЬ ЛИ В user.py
+
+    # Схемы загрузок - ИСПРАВИТЬ НАЗВАНИЯ
+    DownloadTaskSchema,  # Вместо DownloadSchema
     DownloadBatchSchema,
-    DownloadRequestSchema,
-    DownloadResponseSchema,
-    
+    DownloadRequestSchema,  # Вместо DownloadRequestSchema если есть
+    BatchRequestSchema,  # Проверить есть ли
+    DownloadStatsSchema,  # Проверить есть ли
+    # DownloadResponseSchema,  # ЗАКОММЕНТИРОВАТЬ ЕСЛИ НЕТ
+
     # Админские схемы
     AdminUserSchema,
     AdminCreateSchema,
     AdminStatsSchema,
     BroadcastSchema,
-    
-    # Аналитические схемы
-    AnalyticsSchema,
+
+    # Аналитические схемы - ПРОВЕРИТЬ КАКИЕ ЕСТЬ
+    # EventSchema,           # ЗАКОММЕНТИРОВАТЬ ЕСЛИ НЕТ
     DailyStatsSchema,
+    # AnalyticsQuerySchema,  # ЗАКОММЕНТИРОВАТЬ ЕСЛИ НЕТ
     MetricsSchema,
 )
 
@@ -417,9 +420,9 @@ class DatabaseTransaction:
 __all__ = [
     # Метаинформация
     '__version__',
-    '__author__', 
+    '__author__',
     '__description__',
-    
+
     # Конфигурация
     'settings',
     'get_settings',
@@ -430,7 +433,7 @@ __all__ = [
     'DatabaseConfig',
     'DatabaseHealthCheck',
     'DatabaseMaintenance',
-    
+
     # Модели
     'Base', 'BaseModel', 'BaseModelWithSoftDelete', 'BaseModelWithUUID',
     'BaseActiveModel', 'BaseFullModel',
@@ -438,21 +441,21 @@ __all__ = [
     'ActiveMixin', 'MetadataMixin', 'DescriptionMixin',
     'User', 'DownloadBatch', 'DownloadTask', 'RequiredChannel',
     'AdminUser', 'BroadcastMessage', 'Payment', 'AnalyticsEvent', 'DailyStats',
-    
+
     # Константы
     'DownloadStatus', 'UserType', 'Platform', 'FileStatus',
     'AdminRole', 'AdminPermission', 'BroadcastStatus', 'BroadcastTargetType',
     'PaymentStatus', 'PaymentMethod', 'SubscriptionPlan', 'Currency', 'EventType',
     'TABLES', 'TABLE_DEPENDENCIES', 'MODEL_VERSION', 'SCHEMA_VERSION',
-    
-    # Схемы
+
+    # Схемы - ТОЛЬКО СУЩЕСТВУЮЩИЕ
     'BaseSchema', 'ResponseSchema', 'PaginationSchema',
     'UserSchema', 'UserCreateSchema', 'UserUpdateSchema', 'UserStatsSchema',
-    'DownloadSchema', 'DownloadTaskSchema', 'DownloadBatchSchema',
-    'DownloadRequestSchema', 'DownloadResponseSchema',
+    'DownloadTaskSchema', 'DownloadBatchSchema',  # ИСПРАВЛЕНО
+    'DownloadRequestSchema',  # Если есть
     'AdminUserSchema', 'AdminCreateSchema', 'AdminStatsSchema', 'BroadcastSchema',
-    'AnalyticsSchema', 'DailyStatsSchema', 'MetricsSchema',
-    
+    'DailyStatsSchema',
+
     # Исключения
     'VideoBotException', 'VideoBotValidationError', 'VideoBotConfigError',
     'VideoBotDatabaseError', 'VideoBotServiceUnavailableError',
@@ -467,13 +470,13 @@ __all__ = [
     'DownloadWorkerError',
     'StorageException', 'FileNotFoundError', 'StorageQuotaExceededError',
     'FileUploadError', 'CDNError', 'FileExpiredError', 'StorageServiceUnavailableError',
-    
+
     # Утилиты исключений
     'get_exception_category', 'is_user_error', 'is_system_error', 'should_retry',
     'get_user_friendly_message', 'create_error_context', 'handle_exceptions',
     'ExceptionFactory', 'exceptions', 'format_exception_for_user',
     'format_exception_for_admin', 'ErrorCodes', 'EXCEPTION_CATEGORIES',
-    
+
     # Утилиты
     'generate_password_hash', 'check_password', 'generate_secure_token',
     'verify_token', 'encrypt_data', 'decrypt_data',
@@ -483,26 +486,26 @@ __all__ = [
     'generate_unique_id', 'safe_int', 'safe_float', 'truncate_string',
     'RateLimiter', 'MemoryRateLimiter', 'RedisRateLimiter',
     'AESCipher', 'hash_password', 'verify_password_hash',
-    
+
     # Сервисы
     'DatabaseService', 'RedisService', 'init_redis', 'close_redis',
     'AuthService', 'JWTManager', 'AnalyticsService',
-    
+
     # Константы
     'DEFAULT_PAGE_SIZE', 'MAX_PAGE_SIZE', 'SUPPORTED_PLATFORMS',
     'SUPPORTED_FORMATS', 'SUPPORTED_QUALITIES',
     'USER_TYPES', 'DOWNLOAD_STATUSES', 'PLATFORMS',
-    
+
     # Функции управления
     'initialize_shared_components', 'cleanup_shared_components',
     'get_shared_info', 'validate_shared_config',
-    
+
     # Декораторы
     'with_database_session', 'with_exception_handling',
-    
+
     # Контекстные менеджеры
     'DatabaseTransaction',
-    
+
     # Утилиты моделей
     'get_model_fields', 'model_to_dict_safe', 'bulk_create_or_update',
     'track_user_event', 'track_download_event', 'track_payment_event',

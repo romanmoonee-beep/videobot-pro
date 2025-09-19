@@ -339,10 +339,10 @@ class BroadcastMessage(BaseModel, SoftDeleteMixin):
             name='check_priority_range'
         ),
         # Индексы для оптимизации
-        Index('idx_broadcast_status_scheduled', status, scheduled_at),
-        Index('idx_broadcast_admin_created', created_by_admin_id, created_at),
-        Index('idx_broadcast_priority_status', priority, status),
-        Index('idx_broadcast_target_type', target_type, status),
+        Index('idx_broadcast_status_scheduled', 'status', 'scheduled_at'),
+        Index('idx_broadcast_admin_created', 'created_by_admin_id', 'created_at'),
+        Index('idx_broadcast_priority_status', 'priority', 'status'),
+        Index('idx_broadcast_target_type', 'target_type', 'status'),
     )
     
     def __repr__(self) -> str:
