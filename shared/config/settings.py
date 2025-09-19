@@ -6,9 +6,11 @@ VideoBot Pro - Main Settings Configuration
 import os
 from pathlib import Path
 from typing import List, Optional
-from pydantic_settings import BaseSettings
 from pydantic import Field, validator
-
+from pydantic import BaseSettings
+class Config:
+    env_file = ".env"
+    extra = "ignore"  # вместо "forbid"
 
 class Settings(BaseSettings):
     """Main application settings"""
@@ -29,10 +31,7 @@ class Settings(BaseSettings):
     DATABASE_MAX_OVERFLOW: int = Field(default=30, description="Database max overflow connections")
     
     # Redis Configuration
-    REDIS_URL: str = Field(
-        default="redis://localhost:6379/0",
-        description="Redis connection string"
-    )
+    REDIS_URL: str
     REDIS_PREFIX: str = Field(default="videobot:", description="Redis key prefix")
     REDIS_EXPIRE_TIME: int = Field(default=3600, description="Default Redis expiration time")
     
@@ -98,8 +97,8 @@ class Settings(BaseSettings):
     PREMIUM_FILE_RETENTION_HOURS: int = Field(default=720, description="Premium user file retention (30 days)")
     ADMIN_FILE_RETENTION_HOURS: int = Field(default=8760, description="Admin file retention (365 days)")
     
-    CELERY_BROKER_URL: str = Field(default="redis://localhost:6379/1", description="Celery broker URL")
-    CELERY_RESULT_BACKEND: str = Field(default="redis://localhost:6379/2", description="Celery result backend")
+    CELERY_BROKER_URL: str
+    CELERY_RESULT_BACKEND: str
     CELERY_TASK_TIMEOUT: int = Field(default=300, description="Celery task timeout in seconds")
     CELERY_WORKER_CONCURRENCY: int = Field(default=4, description="Celery worker concurrency")
     
@@ -136,11 +135,20 @@ class Settings(BaseSettings):
     PREMIUM_PRICE_USD: float = Field(default=3.99, description="Premium subscription price in USD")
     
     SUPPORTED_PLATFORMS: List[str] = Field(default=["youtube", "tiktok", "instagram"], description="Supported video platforms")
-    
+
+    WORKER_CONCURRENCY: int = 4
+    WORKER_POOL: str = "prefork"
+    TASK_TIMEOUT: int = 1800
+    SOFT_TIMEOUT: int = 1500
+    MAX_FILE_SIZE_MB: int = 500
+    WORKER_BASE_DIR: str = "./worker_data"
+    WORKER_TEMP_DIR: str = "./temp"
+    WORKER_STORAGE_PATH: str = "./storage"
+
     class Config:
         env_file = ".env"
         case_sensitive = True
-        extra = "forbid"
+        extra = "ignore"
     
     @validator('ADMIN_IDS', pre=True)
     def parse_admin_ids(cls, v):

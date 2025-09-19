@@ -8,7 +8,7 @@ __description__ = "VideoBot Pro Worker - Asynchronous task processor"
 
 # Безопасный импорт основных компонентов
 try:
-    from .celery_app import celery_app, create_celery_app, validate_celery_config
+    from celery_app import celery_app, create_celery_app, validate_celery_config
 except ImportError as e:
     print(f"Warning: Could not import celery_app components: {e}")
     celery_app = None

@@ -10,8 +10,9 @@ from enum import Enum
 import asyncio
 
 from shared.config.database import get_async_session
-from shared.models import User, DownloadTask, DownloadBatch, TaskStatus, Platform, EventType
+from shared.models import User, DownloadTask, DownloadBatch, Platform, EventType
 from shared.models.analytics import track_download_event
+from worker.utils.progress_tracker import TaskStatus
 from bot.utils.url_extractor import (
     validate_url, 
     detect_platform, 
