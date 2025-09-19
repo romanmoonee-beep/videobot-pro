@@ -7,7 +7,7 @@ import os
 import tempfile
 from pathlib import Path
 from dataclasses import dataclass, field
-from typing import Dict, Any, Optional
+from typing import Dict, Any, Optional, List
 import structlog
 
 logger = structlog.get_logger(__name__)
