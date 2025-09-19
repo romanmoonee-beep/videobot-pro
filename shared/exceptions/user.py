@@ -5,6 +5,7 @@ VideoBot Pro - User Exceptions
 
 from .base import VideoBotException, VideoBotValidationError, VideoBotAuthorizationError
 
+from typing import Any
 
 class UserException(VideoBotException):
     """Базовое исключение для пользователей"""

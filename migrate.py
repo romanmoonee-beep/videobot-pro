@@ -13,14 +13,25 @@ from pathlib import Path
 project_root = Path(__file__).parent
 sys.path.insert(0, str(project_root))
 
-from alembic.config import Config
-from alembic import command
-from sqlalchemy import create_engine, text
-from sqlalchemy.exc import OperationalError
+# ИСПРАВЛЕНО: импортируем только то что нужно
+try:
+    from alembic.config import Config
+    from alembic import command
+    from sqlalchemy import create_engine, text
+    from sqlalchemy.exc import OperationalError
+except ImportError as e:
+    print(f"❌ Missing required dependency: {e}")
+    print("Please install: pip install alembic")
+    sys.exit(1)
 
-from shared.config.settings import settings
-from shared.models import Base
-from shared.models import get_models_in_dependency_order
+try:
+    from shared.config.settings import settings
+    from shared.models import Base, get_models_in_dependency_order
+except ImportError as e:
+    print(f"❌ Import error: {e}")
+    print("Make sure you're in the project root directory")
+    sys.exit(1)
+
 
 def create_database_if_not_exists():
     """Создать базу данных если не существует"""
@@ -172,13 +183,13 @@ def create_tables_directly():
     """Создать таблицы напрямую без миграций (для быстрого старта)"""
     print("Creating tables directly...")
     try:
-        from shared.config.database import init_database, close_database
+        # ИСПРАВЛЕНО: используем правильные импорты
+        from shared.config.database import init_database, close_database, db_config
         
         # Инициализируем подключение
         asyncio.run(init_database())
         
         # Создаем таблицы
-        from shared.config.database import db_config
         asyncio.run(db_config.create_all_tables())
         
         # Закрываем подключение

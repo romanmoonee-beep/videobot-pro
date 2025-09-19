@@ -13,6 +13,8 @@ from sqlalchemy import (
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 from sqlalchemy.sql import func
 
+from sqlalchemy import or_
+
 from .base import BaseModel
 
 

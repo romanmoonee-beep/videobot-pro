@@ -16,9 +16,9 @@ from .config import (
     close_database,
     get_async_session,
     get_sync_session,
-    DatabaseConfig,
     DatabaseHealthCheck,
     DatabaseMaintenance,
+    db_config,
 )
 
 # Модели базы данных
@@ -95,15 +95,11 @@ from .schemas import (
     UserCreateSchema,
     UserUpdateSchema,
     UserStatsSchema,
-    UserPreferencesSchema,  # ПРОВЕРИТЬ ЕСТЬ ЛИ В user.py
 
-    # Схемы загрузок - ИСПРАВИТЬ НАЗВАНИЯ
-    DownloadTaskSchema,  # Вместо DownloadSchema
+    # Схемы загрузок
+    DownloadTaskSchema,
     DownloadBatchSchema,
-    DownloadRequestSchema,  # Вместо DownloadRequestSchema если есть
-    BatchRequestSchema,  # Проверить есть ли
-    DownloadStatsSchema,  # Проверить есть ли
-    # DownloadResponseSchema,  # ЗАКОММЕНТИРОВАТЬ ЕСЛИ НЕТ
+    DownloadRequestSchema,
 
     # Админские схемы
     AdminUserSchema,
@@ -111,10 +107,8 @@ from .schemas import (
     AdminStatsSchema,
     BroadcastSchema,
 
-    # Аналитические схемы - ПРОВЕРИТЬ КАКИЕ ЕСТЬ
-    # EventSchema,           # ЗАКОММЕНТИРОВАТЬ ЕСЛИ НЕТ
+    # Аналитические схемы
     DailyStatsSchema,
-    # AnalyticsQuerySchema,  # ЗАКОММЕНТИРОВАТЬ ЕСЛИ НЕТ
     MetricsSchema,
 )
 
@@ -180,12 +174,12 @@ from .exceptions import (
     EXCEPTION_CATEGORIES,
 )
 
-# Утилиты
+# Утилиты - ИСПРАВЛЕНО
 from .utils import (
-    # Безопасность
-    generate_password_hash,
-    check_password,
-    generate_secure_token,
+    # Безопасность - исправлены названия функций
+    hash_password,
+    verify_password,
+    generate_token,
     verify_token,
     encrypt_data,
     decrypt_data,
@@ -194,7 +188,7 @@ from .utils import (
     validate_email,
     validate_phone,
     validate_url,
-    validate_telegram_username,
+    validate_telegram_id,
     validate_file_size,
     sanitize_filename,
     
@@ -202,10 +196,8 @@ from .utils import (
     format_file_size,
     format_duration,
     format_currency,
-    generate_unique_id,
-    safe_int,
-    safe_float,
-    truncate_string,
+    generate_uuid,
+    truncate_text,
     
     # Rate limiting
     RateLimiter,
@@ -214,8 +206,6 @@ from .utils import (
     
     # Шифрование
     AESCipher,
-    hash_password,
-    verify_password_hash,
 )
 
 # Сервисы
@@ -230,7 +220,6 @@ from .services import (
     
     # Аутентификация
     AuthService,
-    JWTManager,
     
     # Аналитика
     AnalyticsService,
@@ -279,7 +268,6 @@ async def initialize_shared_components():
         
         # Инициализация Redis (если доступен)
         try:
-            from .services.redis import init_redis
             await init_redis()
         except ImportError:
             pass  # Redis не обязателен
@@ -306,7 +294,6 @@ async def cleanup_shared_components():
         
         # Закрытие Redis подключений
         try:
-            from .services.redis import close_redis
             await close_redis()
         except ImportError:
             pass
@@ -430,9 +417,9 @@ __all__ = [
     'close_database',
     'get_async_session',
     'get_sync_session',
-    'DatabaseConfig',
     'DatabaseHealthCheck',
     'DatabaseMaintenance',
+    'db_config',
 
     # Модели
     'Base', 'BaseModel', 'BaseModelWithSoftDelete', 'BaseModelWithUUID',
@@ -448,13 +435,12 @@ __all__ = [
     'PaymentStatus', 'PaymentMethod', 'SubscriptionPlan', 'Currency', 'EventType',
     'TABLES', 'TABLE_DEPENDENCIES', 'MODEL_VERSION', 'SCHEMA_VERSION',
 
-    # Схемы - ТОЛЬКО СУЩЕСТВУЮЩИЕ
+    # Схемы
     'BaseSchema', 'ResponseSchema', 'PaginationSchema',
     'UserSchema', 'UserCreateSchema', 'UserUpdateSchema', 'UserStatsSchema',
-    'DownloadTaskSchema', 'DownloadBatchSchema',  # ИСПРАВЛЕНО
-    'DownloadRequestSchema',  # Если есть
+    'DownloadTaskSchema', 'DownloadBatchSchema', 'DownloadRequestSchema',
     'AdminUserSchema', 'AdminCreateSchema', 'AdminStatsSchema', 'BroadcastSchema',
-    'DailyStatsSchema',
+    'DailyStatsSchema', 'MetricsSchema',
 
     # Исключения
     'VideoBotException', 'VideoBotValidationError', 'VideoBotConfigError',
@@ -477,19 +463,19 @@ __all__ = [
     'ExceptionFactory', 'exceptions', 'format_exception_for_user',
     'format_exception_for_admin', 'ErrorCodes', 'EXCEPTION_CATEGORIES',
 
-    # Утилиты
-    'generate_password_hash', 'check_password', 'generate_secure_token',
-    'verify_token', 'encrypt_data', 'decrypt_data',
+    # Утилиты - ИСПРАВЛЕНО
+    'hash_password', 'verify_password', 'generate_token', 'verify_token',
+    'encrypt_data', 'decrypt_data',
     'validate_email', 'validate_phone', 'validate_url',
-    'validate_telegram_username', 'validate_file_size', 'sanitize_filename',
+    'validate_telegram_id', 'validate_file_size', 'sanitize_filename',
     'format_file_size', 'format_duration', 'format_currency',
-    'generate_unique_id', 'safe_int', 'safe_float', 'truncate_string',
+    'generate_uuid', 'truncate_text',
     'RateLimiter', 'MemoryRateLimiter', 'RedisRateLimiter',
-    'AESCipher', 'hash_password', 'verify_password_hash',
+    'AESCipher',
 
     # Сервисы
     'DatabaseService', 'RedisService', 'init_redis', 'close_redis',
-    'AuthService', 'JWTManager', 'AnalyticsService',
+    'AuthService', 'AnalyticsService',
 
     # Константы
     'DEFAULT_PAGE_SIZE', 'MAX_PAGE_SIZE', 'SUPPORTED_PLATFORMS',

@@ -14,9 +14,9 @@ from sqlalchemy.pool import QueuePool
 from sqlalchemy.exc import DisconnectionError, OperationalError
 import structlog
 from datetime import datetime, timedelta
-from sqlalchemy import text
-from shared.config.settings import settings
-from shared.models import Base, TABLES, AnalyticsEvent
+
+# ИСПРАВЛЕНО: добавляем правильный импорт
+from ..models import Base, TABLES, AnalyticsEvent
 
 logger = structlog.get_logger(__name__)
 
@@ -36,6 +36,9 @@ class DatabaseConfig:
             return
 
         logger.info("Initializing database connections...")
+        
+        # ИСПРАВЛЕНО: добавляем lazy import для избежания циклических импортов
+        from .settings import settings
 
         # Асинхронный движок
         self.async_engine = create_async_engine(
@@ -69,17 +72,15 @@ class DatabaseConfig:
         self._initialized = True
         logger.info("Database connections initialized successfully")
 
-
-async def _test_connection(self):
-    try:
-        async with self.async_engine.connect() as conn:
-            result = await conn.execute(text("SELECT 1"))
-            assert result.scalar() == 1
-        logger.info("Database connection test successful")
-    except Exception as e:
-        logger.error(f"Database connection test failed: {e}")
-        raise
-
+    async def _test_connection(self):
+        try:
+            async with self.async_engine.connect() as conn:
+                result = await conn.execute(text("SELECT 1"))
+                assert result.scalar() == 1
+            logger.info("Database connection test successful")
+        except Exception as e:
+            logger.error(f"Database connection test failed: {e}")
+            raise
 
     @asynccontextmanager
     async def get_async_session(self) -> AsyncGenerator[AsyncSession, None]:
@@ -94,7 +95,7 @@ async def _test_connection(self):
                 logger.error(f"Async DB session error: {e}")
                 raise
 
-    @asynccontextmanager
+    @asynccontextmanager 
     async def get_sync_session(self) -> AsyncGenerator[Session, None]:
         if not self._initialized:
             await self.initialize()
@@ -207,7 +208,7 @@ async def get_async_session() -> AsyncGenerator[AsyncSession, None]:
         yield session
 
 @asynccontextmanager
-async def get_sync_session() -> Session:
+async def get_sync_session() -> AsyncGenerator[Session, None]:  # ИСПРАВЛЕНО
     async with db_config.get_sync_session() as session:
         yield session
 

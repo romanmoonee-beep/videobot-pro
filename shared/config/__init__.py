@@ -14,13 +14,27 @@ from .database import (
     with_retry,
     db_config
 )
-from .redis import init_redis, close_redis, redis
-from .storage import (
-    StorageConfig,
-    storage_config,
-    init_storage,
-    close_storage
-)
+
+# ИСПРАВЛЕНО: делаем импорты опциональными чтобы избежать ошибок
+try:
+    from .redis import init_redis, close_redis, redis
+except ImportError:
+    init_redis = None
+    close_redis = None
+    redis = None
+
+try:
+    from .storage import (
+        StorageConfig,
+        storage_config,
+        init_storage,
+        close_storage
+    )
+except ImportError:
+    StorageConfig = None
+    storage_config = None
+    init_storage = None
+    close_storage = None
 
 __all__ = [
     # Settings
@@ -37,12 +51,12 @@ __all__ = [
     'with_retry',
     'db_config',
     
-    # Redis
+    # Redis (опционально)
     'init_redis',
     'close_redis',
     'redis',
     
-    # Storage
+    # Storage (опционально)
     'StorageConfig',
     'storage_config',
     'init_storage',
@@ -57,11 +71,15 @@ class DatabaseConfig:
 async def init_all_services():
     """Инициализация всех сервисов конфигурации"""
     await init_database()
-    await init_redis()
-    await init_storage()
+    if init_redis:
+        await init_redis()
+    if init_storage:
+        await init_storage()
 
 async def close_all_services():
     """Закрытие всех сервисов"""
-    await close_storage()
-    await close_redis()
+    if close_storage:
+        await close_storage()
+    if close_redis:
+        await close_redis()
     await close_database()

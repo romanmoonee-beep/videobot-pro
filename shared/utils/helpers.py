@@ -297,6 +297,7 @@ def slugify(text: str, max_length: int = 50) -> str:
 
 def truncate_text(text: str, max_length: int = 100, 
                  suffix: str = "...") -> str:
+
     """
     Обрезает текст до указанной длины
     

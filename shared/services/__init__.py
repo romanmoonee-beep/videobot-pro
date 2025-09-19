@@ -3,41 +3,65 @@ VideoBot Pro - Shared Services Package
 Общие сервисы для всех компонентов системы
 """
 
-from .database import DatabaseService, get_db_session, health_check
-from .redis import RedisService, get_redis_client
-from .auth import AuthService, TokenManager
-from .analytics import AnalyticsService, MetricsCollector
+# ИСПРАВЛЕНО: делаем импорты опциональными
+try:
+    from .database import DatabaseService, get_db_session, health_check
+except ImportError:
+    DatabaseService = None
+    get_db_session = None
+    health_check = None
+
+try:
+    from .redis import RedisService, get_redis_client
+except ImportError:
+    RedisService = None
+    get_redis_client = None
+
+try:
+    from .auth import AuthService
+except ImportError:
+    AuthService = None
+
+try:
+    from .analytics import AnalyticsService
+except ImportError:
+    AnalyticsService = None
 
 # Глобальные экземпляры сервисов
-database_service: DatabaseService = None
-redis_service: RedisService = None
-auth_service: AuthService = None
-analytics_service: AnalyticsService = None
+database_service = None
+redis_service = None
+auth_service = None
+analytics_service = None
 
 async def initialize_services():
     """Инициализация всех shared сервисов"""
     global database_service, redis_service, auth_service, analytics_service
     
+    services = {}
+    
     # Инициализация базы данных
-    database_service = DatabaseService()
-    await database_service.initialize()
+    if DatabaseService:
+        database_service = DatabaseService()
+        await database_service.initialize()
+        services['database'] = database_service
     
     # Инициализация Redis
-    redis_service = RedisService()
-    await redis_service.initialize()
+    if RedisService:
+        redis_service = RedisService()
+        await redis_service.initialize()
+        services['redis'] = redis_service
     
     # Инициализация аутентификации
-    auth_service = AuthService()
+    if AuthService:
+        auth_service = AuthService()
+        services['auth'] = auth_service
     
     # Инициализация аналитики
-    analytics_service = AnalyticsService(database_service, redis_service)
+    if AnalyticsService and database_service and redis_service:
+        analytics_service = AnalyticsService(database_service, redis_service)
+        services['analytics'] = analytics_service
     
-    return {
-        'database': database_service,
-        'redis': redis_service,
-        'auth': auth_service,
-        'analytics': analytics_service
-    }
+    return services
 
 async def shutdown_services():
     """Корректное завершение работы сервисов"""
@@ -67,10 +91,6 @@ __all__ = [
     'RedisService', 
     'AuthService',
     'AnalyticsService',
-    
-    # Вспомогательные классы
-    'TokenManager',
-    'MetricsCollector',
     
     # Утилиты
     'get_db_session',
