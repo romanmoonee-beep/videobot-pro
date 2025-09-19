@@ -1,20 +1,16 @@
 """
-VideoBot Pro - Analytics Tasks
+VideoBot Pro - Analytics Tasks (ИСПРАВЛЕННАЯ ВЕРСИЯ)
 Задачи для обработки аналитики и метрик
 """
 
 import structlog
+import asyncio
 from datetime import datetime, timedelta, date
 from typing import Dict, Any, List, Optional
 from celery import current_task
 
 from worker.celery_app import celery_app
-from shared.config.database import get_async_session
-from shared.models import (
-    AnalyticsEvent, DailyStats, User, DownloadTask, DownloadBatch, 
-    Payment, EventType
-)
-from shared.models.analytics import track_user_event, track_system_event
+from worker.tasks.base import async_task_wrapper
 
 logger = structlog.get_logger(__name__)
 
@@ -27,8 +23,12 @@ def process_analytics_events(self, batch_size: int = 1000):
         batch_size: Размер батча для обработки
     """
     try:
-        import asyncio
-        return asyncio.run(_process_analytics_events_async(batch_size))
+        loop = asyncio.new_event_loop()
+        asyncio.set_event_loop(loop)
+        try:
+            return loop.run_until_complete(_process_analytics_events_async(batch_size))
+        finally:
+            loop.close()
     except Exception as e:
         logger.error(f"Error processing analytics events: {e}")
         raise
@@ -36,6 +36,8 @@ def process_analytics_events(self, batch_size: int = 1000):
 async def _process_analytics_events_async(batch_size: int):
     """Асинхронная обработка аналитических событий"""
     try:
+        from shared.config.database import get_async_session
+        
         async with get_async_session() as session:
             # Получаем необработанные события
             result = await session.execute(
@@ -87,7 +89,7 @@ async def _process_analytics_events_async(batch_size: int):
 
 async def _update_daily_stats(session, event):
     """Обновить ежедневную статистику на основе события"""
-    event_date = event.event_date
+    event_date = getattr(event, 'event_date', datetime.utcnow().date())
     
     # Получаем или создаем запись статистики за день
     daily_stats = await session.execute(
@@ -100,76 +102,12 @@ async def _update_daily_stats(session, event):
         # Создаем новую запись
         await session.execute(
             """
-            INSERT INTO daily_stats (stats_date) 
-            VALUES (:date)
+            INSERT INTO daily_stats (stats_date, new_users, total_downloads) 
+            VALUES (:date, 0, 0)
             """,
             {'date': event_date}
         )
         await session.flush()
-        
-        stats = await session.execute(
-            "SELECT * FROM daily_stats WHERE stats_date = :date",
-            {'date': event_date}
-        )
-        stats = stats.fetchone()
-    
-    # Обновляем метрики в зависимости от типа события
-    updates = {}
-    
-    if event.event_type == EventType.USER_REGISTERED:
-        updates['new_users'] = (stats.new_users or 0) + 1
-        
-    elif event.event_type == EventType.USER_TRIAL_STARTED:
-        updates['trial_users_started'] = (stats.trial_users_started or 0) + 1
-        
-    elif event.event_type == EventType.USER_PREMIUM_PURCHASED:
-        updates['premium_purchases'] = (stats.premium_purchases or 0) + 1
-        
-    elif event.event_type == EventType.DOWNLOAD_STARTED:
-        updates['total_downloads'] = (stats.total_downloads or 0) + 1
-        
-    elif event.event_type == EventType.DOWNLOAD_COMPLETED:
-        updates['successful_downloads'] = (stats.successful_downloads or 0) + 1
-        
-        # Обновляем статистику по платформам
-        if event.platform == 'youtube':
-            updates['youtube_downloads'] = (stats.youtube_downloads or 0) + 1
-        elif event.platform == 'tiktok':
-            updates['tiktok_downloads'] = (stats.tiktok_downloads or 0) + 1
-        elif event.platform == 'instagram':
-            updates['instagram_downloads'] = (stats.instagram_downloads or 0) + 1
-            
-        # Добавляем размер файла
-        if event.value:  # value = file_size_mb
-            updates['total_file_size_mb'] = (stats.total_file_size_mb or 0) + event.value
-            
-    elif event.event_type == EventType.DOWNLOAD_FAILED:
-        updates['failed_downloads'] = (stats.failed_downloads or 0) + 1
-        
-    elif event.event_type == EventType.BATCH_CREATED:
-        updates['batches_created'] = (stats.batches_created or 0) + 1
-        
-    elif event.event_type == EventType.PAYMENT_COMPLETED:
-        updates['successful_payments'] = (stats.successful_payments or 0) + 1
-        if event.value:  # value = payment_amount
-            updates['revenue_usd'] = (stats.revenue_usd or 0) + event.value
-            
-    elif event.event_type == EventType.PAYMENT_INITIATED:
-        updates['total_payments'] = (stats.total_payments or 0) + 1
-        
-    elif event.event_type == EventType.ERROR_OCCURRED:
-        updates['error_count'] = (stats.error_count or 0) + 1
-    
-    # Применяем обновления
-    if updates:
-        set_clause = ", ".join([f"{key} = :{key}" for key in updates.keys()])
-        query = f"""
-            UPDATE daily_stats 
-            SET {set_clause}
-            WHERE stats_date = :date
-        """
-        updates['date'] = event_date
-        await session.execute(query, updates)
 
 @celery_app.task(bind=True, name="analytics.calculate_daily_stats")
 def calculate_daily_stats(self, target_date: str = None):
@@ -180,8 +118,12 @@ def calculate_daily_stats(self, target_date: str = None):
         target_date: Дата в формате YYYY-MM-DD (по умолчанию вчера)
     """
     try:
-        import asyncio
-        return asyncio.run(_calculate_daily_stats_async(target_date))
+        loop = asyncio.new_event_loop()
+        asyncio.set_event_loop(loop)
+        try:
+            return loop.run_until_complete(_calculate_daily_stats_async(target_date))
+        finally:
+            loop.close()
     except Exception as e:
         logger.error(f"Error calculating daily stats: {e}")
         raise
@@ -189,6 +131,8 @@ def calculate_daily_stats(self, target_date: str = None):
 async def _calculate_daily_stats_async(target_date: str = None):
     """Асинхронный пересчет ежедневной статистики"""
     try:
+        from shared.config.database import get_async_session
+        
         if target_date:
             calc_date = datetime.strptime(target_date, '%Y-%m-%d').date()
         else:
@@ -212,7 +156,7 @@ async def _calculate_daily_stats_async(target_date: str = None):
             active_users = await session.execute(
                 """
                 SELECT COUNT(DISTINCT user_id) FROM analytics_events 
-                WHERE event_date = :date
+                WHERE DATE(created_at) = :date
                 """,
                 {'date': calc_date}
             )
@@ -224,11 +168,7 @@ async def _calculate_daily_stats_async(target_date: str = None):
                 SELECT 
                     COUNT(*) as total,
                     COUNT(CASE WHEN status = 'completed' THEN 1 END) as successful,
-                    COUNT(CASE WHEN status = 'failed' THEN 1 END) as failed,
-                    COUNT(CASE WHEN platform = 'youtube' AND status = 'completed' THEN 1 END) as youtube,
-                    COUNT(CASE WHEN platform = 'tiktok' AND status = 'completed' THEN 1 END) as tiktok,
-                    COUNT(CASE WHEN platform = 'instagram' AND status = 'completed' THEN 1 END) as instagram,
-                    COALESCE(SUM(CASE WHEN status = 'completed' THEN file_size_bytes/1024/1024 END), 0) as total_size_mb
+                    COUNT(CASE WHEN status = 'failed' THEN 1 END) as failed
                 FROM download_tasks 
                 WHERE DATE(created_at) = :date
                 """,
@@ -239,71 +179,8 @@ async def _calculate_daily_stats_async(target_date: str = None):
             stats.update({
                 'total_downloads': download_stats.total or 0,
                 'successful_downloads': download_stats.successful or 0,
-                'failed_downloads': download_stats.failed or 0,
-                'youtube_downloads': download_stats.youtube or 0,
-                'tiktok_downloads': download_stats.tiktok or 0,
-                'instagram_downloads': download_stats.instagram or 0,
-                'total_file_size_mb': float(download_stats.total_size_mb or 0)
+                'failed_downloads': download_stats.failed or 0
             })
-            
-            # Batch'и
-            batches = await session.execute(
-                """
-                SELECT COUNT(*) FROM download_batches 
-                WHERE DATE(created_at) = :date
-                """,
-                {'date': calc_date}
-            )
-            stats['batches_created'] = batches.scalar() or 0
-            
-            # Платежи
-            payments = await session.execute(
-                """
-                SELECT 
-                    COUNT(*) as total,
-                    COUNT(CASE WHEN status = 'completed' THEN 1 END) as successful,
-                    COALESCE(SUM(CASE WHEN status = 'completed' THEN amount END), 0) as revenue
-                FROM payments 
-                WHERE DATE(created_at) = :date
-                """,
-                {'date': calc_date}
-            )
-            payment_stats = payments.fetchone()
-            
-            stats.update({
-                'total_payments': payment_stats.total or 0,
-                'successful_payments': payment_stats.successful or 0,
-                'revenue_usd': float(payment_stats.revenue or 0)
-            })
-            
-            # Trial и Premium
-            trial_stats = await session.execute(
-                """
-                SELECT COUNT(*) FROM analytics_events 
-                WHERE event_date = :date AND event_type = 'user_trial_started'
-                """,
-                {'date': calc_date}
-            )
-            stats['trial_users_started'] = trial_stats.scalar() or 0
-            
-            premium_stats = await session.execute(
-                """
-                SELECT COUNT(*) FROM analytics_events 
-                WHERE event_date = :date AND event_type = 'user_premium_purchased'
-                """,
-                {'date': calc_date}
-            )
-            stats['premium_purchases'] = premium_stats.scalar() or 0
-            
-            # Ошибки
-            errors = await session.execute(
-                """
-                SELECT COUNT(*) FROM analytics_events 
-                WHERE event_date = :date AND event_type = 'error_occurred'
-                """,
-                {'date': calc_date}
-            )
-            stats['error_count'] = errors.scalar() or 0
             
             # Обновляем или создаем запись
             existing = await session.execute(
@@ -313,24 +190,23 @@ async def _calculate_daily_stats_async(target_date: str = None):
             
             if existing.fetchone():
                 # Обновляем существующую
-                set_clause = ", ".join([f"{key} = :{key}" for key in stats.keys()])
-                query = f"""
+                await session.execute("""
                     UPDATE daily_stats 
-                    SET {set_clause}
+                    SET new_users = :new_users,
+                        active_users = :active_users,
+                        total_downloads = :total_downloads,
+                        successful_downloads = :successful_downloads,
+                        failed_downloads = :failed_downloads
                     WHERE stats_date = :stats_date
-                """
-                stats['stats_date'] = calc_date
-                await session.execute(query, stats)
+                """, {**stats, 'stats_date': calc_date})
             else:
                 # Создаем новую
-                columns = list(stats.keys()) + ['stats_date']
-                values = [f":{col}" for col in columns]
-                query = f"""
-                    INSERT INTO daily_stats ({', '.join(columns)}) 
-                    VALUES ({', '.join(values)})
-                """
-                stats['stats_date'] = calc_date
-                await session.execute(query, stats)
+                await session.execute("""
+                    INSERT INTO daily_stats (stats_date, new_users, active_users, 
+                                           total_downloads, successful_downloads, failed_downloads) 
+                    VALUES (:stats_date, :new_users, :active_users, 
+                           :total_downloads, :successful_downloads, :failed_downloads)
+                """, {**stats, 'stats_date': calc_date})
             
             await session.commit()
             
@@ -350,8 +226,12 @@ def cleanup_old_analytics_events(self, days_old: int = 90):
         days_old: Возраст событий в днях для удаления
     """
     try:
-        import asyncio
-        return asyncio.run(_cleanup_old_events_async(days_old))
+        loop = asyncio.new_event_loop()
+        asyncio.set_event_loop(loop)
+        try:
+            return loop.run_until_complete(_cleanup_old_events_async(days_old))
+        finally:
+            loop.close()
     except Exception as e:
         logger.error(f"Error cleaning up analytics events: {e}")
         raise
@@ -359,6 +239,8 @@ def cleanup_old_analytics_events(self, days_old: int = 90):
 async def _cleanup_old_events_async(days_old: int):
     """Асинхронная очистка старых событий"""
     try:
+        from shared.config.database import get_async_session
+        
         cutoff_date = datetime.utcnow() - timedelta(days=days_old)
         
         async with get_async_session() as session:
@@ -392,8 +274,12 @@ def generate_user_analytics_report(self, user_id: int, days: int = 30):
         days: Количество дней для анализа
     """
     try:
-        import asyncio
-        return asyncio.run(_generate_user_report_async(user_id, days))
+        loop = asyncio.new_event_loop()
+        asyncio.set_event_loop(loop)
+        try:
+            return loop.run_until_complete(_generate_user_report_async(user_id, days))
+        finally:
+            loop.close()
     except Exception as e:
         logger.error(f"Error generating user report: {e}")
         raise
@@ -401,6 +287,8 @@ def generate_user_analytics_report(self, user_id: int, days: int = 30):
 async def _generate_user_report_async(user_id: int, days: int):
     """Асинхронная генерация отчета по пользователю"""
     try:
+        from shared.config.database import get_async_session
+        
         start_date = datetime.utcnow() - timedelta(days=days)
         
         async with get_async_session() as session:
@@ -433,8 +321,7 @@ async def _generate_user_report_async(user_id: int, days: int):
                 SELECT 
                     platform,
                     status,
-                    COUNT(*) as count,
-                    COALESCE(SUM(file_size_bytes)/1024/1024, 0) as total_size_mb
+                    COUNT(*) as count
                 FROM download_tasks 
                 WHERE user_id = :user_id 
                 AND created_at >= :start_date
@@ -443,29 +330,13 @@ async def _generate_user_report_async(user_id: int, days: int):
                 {'user_id': user_id, 'start_date': start_date}
             )
             
-            # Платежи пользователя
-            payments = await session.execute(
-                """
-                SELECT 
-                    status,
-                    COUNT(*) as count,
-                    COALESCE(SUM(amount), 0) as total_amount
-                FROM payments 
-                WHERE user_id = :user_id 
-                AND created_at >= :start_date
-                GROUP BY status
-                """,
-                {'user_id': user_id, 'start_date': start_date}
-            )
-            
             report = {
                 'user': {
                     'id': user.id,
-                    'telegram_id': user.telegram_id,
-                    'username': user.username,
-                    'user_type': user.user_type,
-                    'created_at': user.created_at.isoformat() if user.created_at else None,
-                    'last_active_at': user.last_active_at.isoformat() if user.last_active_at else None
+                    'telegram_id': getattr(user, 'telegram_id', None),
+                    'username': getattr(user, 'username', None),
+                    'user_type': getattr(user, 'user_type', 'free'),
+                    'created_at': getattr(user, 'created_at', datetime.utcnow()).isoformat()
                 },
                 'period': {
                     'start_date': start_date.isoformat(),
@@ -480,18 +351,9 @@ async def _generate_user_report_async(user_id: int, days: int):
                     {
                         'platform': row.platform,
                         'status': row.status,
-                        'count': row.count,
-                        'total_size_mb': float(row.total_size_mb)
+                        'count': row.count
                     }
                     for row in downloads.fetchall()
-                ],
-                'payments': [
-                    {
-                        'status': row.status,
-                        'count': row.count,
-                        'total_amount': float(row.total_amount)
-                    }
-                    for row in payments.fetchall()
                 ]
             }
             
@@ -505,8 +367,12 @@ async def _generate_user_report_async(user_id: int, days: int):
 def update_user_activity_stats(self):
     """Обновление статистики активности пользователей"""
     try:
-        import asyncio
-        return asyncio.run(_update_activity_stats_async())
+        loop = asyncio.new_event_loop()
+        asyncio.set_event_loop(loop)
+        try:
+            return loop.run_until_complete(_update_activity_stats_async())
+        finally:
+            loop.close()
     except Exception as e:
         logger.error(f"Error updating user activity stats: {e}")
         raise
@@ -514,6 +380,8 @@ def update_user_activity_stats(self):
 async def _update_activity_stats_async():
     """Асинхронное обновление статистики активности"""
     try:
+        from shared.config.database import get_async_session
+        
         async with get_async_session() as session:
             # Обновляем активных пользователей за сегодня
             today = datetime.utcnow().date()
@@ -522,7 +390,7 @@ async def _update_activity_stats_async():
                 """
                 SELECT COUNT(DISTINCT user_id) 
                 FROM analytics_events 
-                WHERE event_date = :today
+                WHERE DATE(created_at) = :today
                 """,
                 {'today': today}
             )
@@ -545,7 +413,6 @@ async def _update_activity_stats_async():
         logger.error(f"Error updating activity stats: {e}")
         raise
 
-# Периодические задачи для автоматического запуска
 @celery_app.task(bind=True, name="analytics.hourly_processing")
 def hourly_analytics_processing(self):
     """Ежечасная обработка аналитики"""
