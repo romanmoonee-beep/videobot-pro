@@ -8,7 +8,7 @@ import structlog
 from datetime import datetime, timedelta
 from typing import Dict, List, Optional
 
-from aiogram import Router, Bot
+from aiogram import Router, Bot, F
 from aiogram.types import Message, CallbackQuery, InlineKeyboardMarkup, InlineKeyboardButton
 from aiogram.exceptions import TelegramBadRequest, TelegramForbiddenError
 from aiogram.enums import ChatMemberStatus

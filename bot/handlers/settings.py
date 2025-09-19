@@ -156,11 +156,11 @@ async def handle_language_settings(callback: CallbackQuery, state: FSMContext):
                 return
             
             current_language = user.ui_language or "ru"
-            
+
             language_text = [
                 "🌐 Выбор языка интерфейса",
                 "",
-                f"Текущий язык: {{'ru': 'Русский', 'en': 'English'}.get(current_language, 'Русский')}",
+                f"Текущий язык: { {'ru': 'Русский', 'en': 'English'}.get(current_language, 'Русский')}",
                 "",
                 "Доступные языки:"
             ]
