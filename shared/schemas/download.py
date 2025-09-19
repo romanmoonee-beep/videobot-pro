@@ -7,6 +7,9 @@ from datetime import datetime
 from typing import Optional, Dict, Any, List
 from pydantic import BaseModel, Field, validator, HttpUrl
 
+from .base import BaseSchema, TimestampSchema, IDSchema
+from .common import PlatformEnum, QualityEnum, StatusEnum
+
 class DownloadRequestSchema(BaseModel):
     """Схема запроса на скачивание"""
     url: str = Field(description="URL видео для скачивания")

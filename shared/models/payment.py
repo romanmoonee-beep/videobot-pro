@@ -353,11 +353,11 @@ class Payment(BaseModel):
             name='check_risk_score_range'
         ),
         # Индексы для оптимизации
-        Index('idx_payment_user_status', user_id, status),
-        Index('idx_payment_status_created', status, created_at),
-        Index('idx_payment_method_status', payment_method, status),
-        Index('idx_payment_external_id', external_payment_id),
-        Index('idx_payment_expires_at', expires_at),
+        Index('idx_payment_user_status', 'user_id', 'status'),
+        Index('idx_payment_status_created', 'status', 'created_at'),
+        Index('idx_payment_method_status', 'payment_method', 'status'),
+        Index('idx_payment_external_id', 'external_payment_id'),
+        Index('idx_payment_expires_at', 'expires_at'),
     )
     
     def __repr__(self) -> str:

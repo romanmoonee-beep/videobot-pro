@@ -8,7 +8,7 @@ from typing import Any, Dict, Optional
 from sqlalchemy import DateTime, func, Integer, String, Text
 from sqlalchemy.ext.declarative import declared_attr
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
-from sqlalchemy.dialects.postgresql import UUID
+from sqlalchemy.dialects.postgresql import UUID, JSON
 import uuid
 
 
@@ -126,9 +126,9 @@ class MetadataMixin:
     Mixin для дополнительных метаданных
     Хранит произвольные данные в JSON формате
     """
-    
+
     metadata: Mapped[Optional[Dict[str, Any]]] = mapped_column(
-        type_=None,  # Будет использовать JSON тип PostgreSQL
+        JSON,
         nullable=True,
         comment="Дополнительные метаданные в JSON формате"
     )

@@ -275,12 +275,11 @@ class User(BaseModel, SoftDeleteMixin):
     )
     
     # Relationships (будут добавлены в других моделях)
-     download_batches = relationship("DownloadBatch", back_populates="user")
-     download_tasks = relationship("DownloadTask", secondary="download_batches", viewonly=Tru, back_populates="user"  # если у DownloadTask есть user
-)
+    download_batches = relationship("DownloadBatch", back_populates="user")
+    download_tasks = relationship("DownloadTask", back_populates="user")
 
-     payments = relationship("Payment", back_populates="user")
-     analytics_events = relationship("AnalyticsEvent", back_populates="user")
+    payments = relationship("Payment", back_populates="user")
+    analytics_events = relationship("AnalyticsEvent", back_populates="user")
     
     # Constraints
     __table_args__ = (

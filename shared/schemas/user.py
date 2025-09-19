@@ -7,6 +7,9 @@ from datetime import datetime
 from typing import Optional, Dict, Any, List
 from pydantic import BaseModel, Field, validator
 
+from .base import BaseSchema, TimestampSchema, IDSchema
+from .common import UserTypeEnum
+
 class UserPreferencesSchema(BaseModel):
     """Схема пользовательских предпочтений"""
     quality_mode: str = Field(default="auto", description="Режим качества: auto, max, manual")

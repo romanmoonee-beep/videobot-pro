@@ -7,7 +7,7 @@ from datetime import datetime, timedelta
 from typing import Optional, Dict, Any, List
 from sqlalchemy import (
     BigInteger, String, Integer, Boolean, DateTime, 
-    Text, JSON, Index, CheckConstraint
+    Text, JSON, Index, CheckConstraint, and_, or_
 )
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 from sqlalchemy.sql import func
@@ -224,10 +224,10 @@ class RequiredChannel(BaseModel, ActiveMixin):
             name='check_subscribers_positive'
         ),
         # Индексы для оптимизации
-        Index('idx_channel_required_active', is_required, is_active),
-        Index('idx_channel_priority_order', priority, order_index),
-        Index('idx_channel_check_enabled', check_enabled, is_active),
-        Index('idx_channel_dates', start_date, end_date),
+        Index('idx_channel_required_active', 'is_required', 'is_active'),
+        Index('idx_channel_priority_order', 'priority', 'order_index'),
+        Index('idx_channel_check_enabled', 'check_enabled', 'is_active'),
+        Index('idx_channel_dates', 'start_date', 'end_date'),
     )
     
     def __repr__(self) -> str:

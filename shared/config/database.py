@@ -69,7 +69,7 @@ class DatabaseConfig:
         self._initialized = True
         logger.info("Database connections initialized successfully")
 
-    
+
 async def _test_connection(self):
     try:
         async with self.async_engine.connect() as conn:

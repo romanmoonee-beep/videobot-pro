@@ -7,6 +7,8 @@ from datetime import datetime
 from typing import Optional, Dict, Any, List
 from pydantic import BaseModel, Field, validator, EmailStr
 
+from .base import BaseSchema, TimestampSchema, IDSchema
+
 class AdminUserSchema(BaseModel):
     """Схема администратора"""
     id: int = Field(description="ID администратора")

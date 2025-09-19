@@ -254,7 +254,7 @@ class DownloadBatch(BaseModel):
     
     # Relationships
     user = relationship("User", back_populates="download_batches")
-    download_tasks = relationship("DownloadTask", back_populates="batch", cascade="all, delete-orphan")
+    download_tasks = relationship("DownloadTask", back_populates="batch")
     
     # Constraints и индексы
     __table_args__ = (
@@ -291,11 +291,11 @@ class DownloadBatch(BaseModel):
             name='check_retry_count_positive'
         ),
         # Оптимизированные индексы
-        Index('idx_batch_user_status', user_id, status),
-        Index('idx_batch_status_created', status, created_at),
-        Index('idx_batch_expires_at', expires_at),
-        Index('idx_batch_telegram_user', telegram_user_id, created_at),
-        Index('idx_batch_priority_status', priority, status),
+        Index('idx_batch_user_status', 'user_id', 'status'),
+        Index('idx_batch_status_created', 'status', 'created_at'),
+        Index('idx_batch_expires_at', 'expires_at'),
+        Index('idx_batch_telegram_user', 'telegram_user_id', 'created_at'),
+        Index('idx_batch_priority_status', 'priority', 'status'),
     )
     
     def __repr__(self) -> str:

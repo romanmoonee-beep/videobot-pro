@@ -109,6 +109,8 @@ __all__ = [
     "track_user_event",
     "track_download_event",
     "track_payment_event",
+    "get_models_in_dependency_order",
+    "get_model_by_table_name"
 ]
 
 # Список всех таблиц для миграций
@@ -123,3 +125,49 @@ TABLES = [
     "analytics_events",
     "daily_stats",
 ]
+
+def get_models_in_dependency_order():
+    """Возвращает модели в порядке зависимостей для миграций"""
+    return [
+        User,
+        AdminUser,
+        RequiredChannel,
+        DownloadBatch,
+        DownloadTask,
+        BroadcastMessage,
+        Payment,
+        AnalyticsEvent,
+        DailyStats,
+    ]
+
+def get_model_by_table_name(table_name: str):
+    """Получить модель по имени таблицы"""
+    models_map = {
+        'users': User,
+        'admin_users': AdminUser,
+        'required_channels': RequiredChannel,
+        'download_batches': DownloadBatch,
+        'download_tasks': DownloadTask,
+        'broadcast_messages': BroadcastMessage,
+        'payments': Payment,
+        'analytics_events': AnalyticsEvent,
+        'daily_stats': DailyStats,
+    }
+    return models_map.get(table_name)
+
+# Метаданные
+MODEL_VERSION = "2.1.0"
+SCHEMA_VERSION = "1.0.0"
+
+# Зависимости таблиц для миграций
+TABLE_DEPENDENCIES = {
+    'users': [],
+    'admin_users': [],
+    'required_channels': [],
+    'download_batches': ['users'],
+    'download_tasks': ['users', 'download_batches'],
+    'broadcast_messages': ['admin_users'],
+    'payments': ['users'],
+    'analytics_events': ['users', 'admin_users'],
+    'daily_stats': [],
+}

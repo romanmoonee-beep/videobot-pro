@@ -252,12 +252,12 @@ class AnalyticsEvent(BaseModel):
             name='check_duration_positive'
         ),
         # Композитные индексы для аналитики
-        Index('idx_analytics_type_date', event_type, event_date),
-        Index('idx_analytics_category_date', event_category, event_date),
-        Index('idx_analytics_user_date', user_id, event_date),
-        Index('idx_analytics_platform_date', platform, event_date),
-        Index('idx_analytics_date_hour', event_date, event_hour),
-        Index('idx_analytics_processed', is_processed, created_at),
+        Index('idx_analytics_type_date', 'event_type', 'event_date'),
+        Index('idx_analytics_category_date', 'event_category', 'event_date'),
+        Index('idx_analytics_user_date', 'user_id', 'event_date'),
+        Index('idx_analytics_platform_date', 'platform', 'event_date'),
+        Index('idx_analytics_date_hour', 'event_date', 'event_hour'),
+        Index('idx_analytics_processed', 'is_processed', 'created_at'),
     )
     
     def __repr__(self) -> str:

@@ -7,6 +7,9 @@ from datetime import datetime, date
 from typing import Optional, Dict, Any, List
 from pydantic import BaseModel, Field, validator
 
+from .base import BaseSchema, TimestampSchema, IDSchema
+from .common import PlatformEnum, UserTypeEnum
+
 class EventSchema(BaseModel):
     """Схема аналитического события"""
     id: int = Field(description="ID события")

@@ -14,23 +14,15 @@ class VideoBotException(Exception):
     
     Все исключения проекта должны наследоваться от этого класса
     """
-    
+
     def __init__(
-        self,
-        message: str,
-        error_code: str = None,
-        details: Dict[str, Any] = None,
-        user_message: str = None,
-        original_exception: Exception = None
+            self,
+            message: str,
+            error_code: str = None,
+            details: Dict[str, Any] = None,
+            user_message: str = None,
+            original_exception: Exception = None
     ):
-        """
-        Args:
-            message: Техническое сообщение об ошибке
-            error_code: Код ошибки для классификации
-            details: Дополнительные детали ошибки
-            user_message: Сообщение для пользователя (если отличается от технического)
-            original_exception: Исходное исключение (если есть)
-        """
         super().__init__(message)
         self.message = message
         self.error_code = error_code or self.__class__.__name__.upper()
