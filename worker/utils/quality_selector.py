@@ -10,6 +10,18 @@ import math
 
 logger = structlog.get_logger(__name__)
 
+class QualitySelectorError(Exception):
+    """Базовое исключение для селектора качества"""
+    pass
+
+class NoSuitableFormatError(QualitySelectorError):
+    """Исключение когда не найден подходящий формат"""
+    pass
+
+class InvalidFormatError(QualitySelectorError):
+    """Исключение когда формат невалиден"""
+    pass
+
 @dataclass
 class FormatInfo:
     """Информация о доступном формате видео"""

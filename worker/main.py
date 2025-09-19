@@ -4,9 +4,6 @@ VideoBot Pro - Worker Main
 """
 import os
 import sys
-
-sys.path.append(os.path.dirname(os.path.abspath(__file__)))
-
 import asyncio
 import signal
 from typing import Optional
@@ -90,38 +87,34 @@ class WorkerManager:
             raise
         finally:
             await self.shutdown()
-    
+
     async def _start_celery_worker(self):
         """Запуск Celery worker'а"""
         # Импортируем все задачи для регистрации
         from . import tasks
-        
-        # Параметры запуска worker'а
-        worker_args = [
-            "--app=worker.celery_app:celery_app",
-            f"--concurrency={worker_config.worker_concurrency}",
-            f"--hostname=worker@%h",
-            "--loglevel=INFO",
-            "--without-gossip",
-            "--without-mingle",
-            "--without-heartbeat",
+
+        logger.info(f"Starting Celery worker with concurrency: {worker_config.worker_concurrency}")
+
+        # Запускаем worker напрямую через celery_app
+        argv = [
+            'worker',
+            f'--concurrency={worker_config.worker_concurrency}',
+            '--loglevel=INFO',
+            '--hostname=worker@%h',
+            '--without-gossip',
+            '--without-mingle',
+            '--without-heartbeat',
         ]
-        
+
         # Определяем очереди для обработки
         queues = ["default", "downloads", "batches", "cleanup", "analytics", "notifications"]
-        worker_args.append(f"--queues={','.join(queues)}")
-        
-        logger.info(f"Starting Celery worker with args: {worker_args}")
-        
-        # Запускаем worker в отдельном процессе
-        from celery.bin import worker
-        worker_instance = worker.worker(app=celery_app)
-        worker_instance.run(**{
-            'concurrency': worker_config.worker_concurrency,
-            'loglevel': 'INFO',
-            'queues': queues,
-            'hostname': 'worker@%h',
-        })
+        argv.append(f'--queues={",".join(queues)}')
+
+        try:
+            celery_app.worker_main(argv)
+        except SystemExit:
+            # Celery завершается с SystemExit при нормальном shutdown
+            pass
     
     async def _start_celery_beat(self):
         """Запуск Celery Beat (планировщика)"""

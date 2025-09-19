@@ -93,7 +93,7 @@ class BotApplication:
                 token=bot_config.bot_token,
                 default=DefaultBotProperties(
                     parse_mode=ParseMode.HTML,
-                    disable_web_page_preview=True
+                    link_preview_is_disabled=True
                 )
             )
             

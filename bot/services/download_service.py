@@ -8,6 +8,7 @@ from typing import Dict, List, Optional, Tuple, Any
 from datetime import datetime, timedelta
 from enum import Enum
 import asyncio
+from sqlalchemy import text
 
 from shared.config.database import get_async_session
 from shared.models import User, DownloadTask, DownloadBatch, Platform, EventType
@@ -347,11 +348,13 @@ class DownloadService:
             async with get_async_session() as session:
                 # Удаляем старые завершенные/отмененные задачи
                 result = await session.execute(
-                    """
-                    DELETE FROM download_tasks 
-                    WHERE created_at < :cutoff_date 
-                    AND status IN ('completed', 'failed', 'cancelled')
-                    """,
+                    text(
+                        """
+                        DELETE FROM download_tasks 
+                        WHERE created_at < :cutoff_date 
+                        AND status IN ('completed', 'failed', 'cancelled')
+                        """
+                    ),
                     {'cutoff_date': cutoff_date}
                 )
                 

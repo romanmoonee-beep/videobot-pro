@@ -17,7 +17,6 @@ from sqlalchemy import or_
 
 from .base import BaseModel
 
-
 class EventType:
     """Типы аналитических событий"""
     # Пользователи
@@ -67,6 +66,15 @@ class EventType:
         MESSAGE_SENT, BUTTON_CLICKED, COMMAND_EXECUTED
     ]
 
+class BatchStatus:
+    """Статусы batch-операций скачивания"""
+    PENDING = "pending"
+    PROCESSING = "processing"
+    COMPLETED = "completed"
+    FAILED = "failed"
+    CANCELLED = "cancelled"
+
+    ALL = [PENDING, PROCESSING, COMPLETED, FAILED, CANCELLED]
 
 class AnalyticsEvent(BaseModel):
     """
@@ -601,5 +609,22 @@ def track_payment_event(event_type: str, user_id: int, payment_amount: float,
         user_id=user_id,
         value=payment_amount,
         event_data={'payment_method': payment_method},
+        **kwargs
+    )
+
+
+def track_system_event(event_type: str, event_data: Dict[str, Any] = None,
+                       error_message: str = None, duration_seconds: int = None,
+                       **kwargs):
+    """Отследить системное событие"""
+    data = event_data or {}
+    if error_message:
+        data['error_message'] = error_message
+
+    return AnalyticsEvent.track_event(
+        event_type=event_type,
+        event_data=data,
+        duration_seconds=duration_seconds,
+        source='system',
         **kwargs
     )

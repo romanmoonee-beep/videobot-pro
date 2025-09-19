@@ -8,9 +8,11 @@ from typing import Dict, List, Optional, Any, Union
 from datetime import datetime, timedelta
 from uuid import uuid4
 import asyncio
+from sqlalchemy import text
 
 from shared.config.database import get_async_session
-from shared.models import User, DownloadBatch, DownloadTask, TaskStatus, BatchStatus, Platform, EventType
+from shared.models import User, DownloadBatch, DownloadTask, Platform, EventType
+from shared.models.analytics import BatchStatus
 from shared.models.analytics import track_download_event
 from bot.utils.url_extractor import (
     extract_video_urls,
@@ -298,11 +300,11 @@ class BatchService:
                     
                     # Отменяем все связанные задачи
                     await session.execute(
-                        """
+                        text("""
                         UPDATE download_tasks 
                         SET status = 'cancelled', cancelled_at = NOW()
                         WHERE batch_id = :batch_id AND status IN ('pending', 'processing')
-                        """,
+                        """),
                         {'batch_id': batch_id}
                     )
                     
@@ -356,7 +358,7 @@ class BatchService:
                 query += " ORDER BY created_at DESC LIMIT :limit OFFSET :offset"
                 params.update({'limit': limit, 'offset': offset})
                 
-                result = await session.execute(query, params)
+                result = await session.execute(text(query), params)
                 batches = result.fetchall()
                 
                 batch_list = []
@@ -407,12 +409,12 @@ class BatchService:
                 
                 # Сбрасываем неудачные задачи
                 await session.execute(
-                    """
+                    text("""
                     UPDATE download_tasks 
                     SET status = 'pending', error_message = NULL, failed_at = NULL,
                         retry_count = retry_count + 1
                     WHERE batch_id = :batch_id AND status = 'failed'
-                    """,
+                    """),
                     {'batch_id': batch_id}
                 )
                 
@@ -445,12 +447,12 @@ class BatchService:
             async with get_async_session() as session:
                 # Помечаем истекшие batch'и как expired
                 result = await session.execute(
-                    """
+                    text("""
                     UPDATE download_batches 
                     SET status = 'expired'
                     WHERE expires_at < NOW() 
                     AND status NOT IN ('completed', 'failed', 'cancelled', 'expired')
-                    """
+                    """)
                 )
                 
                 expired_count = result.rowcount
@@ -458,10 +460,10 @@ class BatchService:
                 # Удаляем старые истекшие batch'и (старше 30 дней)
                 old_cutoff = datetime.utcnow() - timedelta(days=30)
                 await session.execute(
-                    """
+                    text("""
                     DELETE FROM download_batches 
                     WHERE status = 'expired' AND created_at < :cutoff
-                    """,
+                    """),
                     {'cutoff': old_cutoff}
                 )
                 
@@ -571,7 +573,7 @@ class BatchService:
     async def _get_batch_task_stats(self, session, batch_id: int) -> Dict[str, Any]:
         """Получить статистику задач batch'а"""
         result = await session.execute(
-            """
+            text("""
             SELECT 
                 status,
                 COUNT(*) as count,
@@ -580,7 +582,7 @@ class BatchService:
             FROM download_tasks 
             WHERE batch_id = :batch_id 
             GROUP BY status
-            """,
+            """),
             {'batch_id': batch_id}
         )
         

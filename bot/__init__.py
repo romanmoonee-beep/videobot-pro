@@ -81,7 +81,7 @@ def check_bot_health() -> dict:
     return {
         "status": "healthy",
         "version": __version__,
-        "config_loaded": bool(bot_config.token),
+        "config_loaded": bool(bot_config.bot_token),
         "admin_configured": len(ADMIN_IDS) > 0,
         "features_enabled": {
             "trial": bot_config.trial_enabled,
@@ -91,7 +91,7 @@ def check_bot_health() -> dict:
         }
     }
 
-if not bot_config.token:
+if not bot_config.bot_token:
     import warnings
     warnings.warn("BOT_TOKEN не настроен! Бот не сможет работать.", UserWarning)
 

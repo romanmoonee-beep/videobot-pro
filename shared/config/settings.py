@@ -7,10 +7,13 @@ import os
 from pathlib import Path
 from typing import List, Optional
 from pydantic import Field, validator
-from pydantic import BaseSettings
+from pydantic_settings import BaseSettings
+
+ENV_PATH = Path(__file__).resolve().parent.parent.parent / ".env"
+
 class Config:
-    env_file = ".env"
-    extra = "ignore"  # вместо "forbid"
+    env_file = str(ENV_PATH)
+    env_file_encoding = 'utf-8'
 
 class Settings(BaseSettings):
     """Main application settings"""
@@ -31,19 +34,19 @@ class Settings(BaseSettings):
     DATABASE_MAX_OVERFLOW: int = Field(default=30, description="Database max overflow connections")
     
     # Redis Configuration
-    REDIS_URL: str
+    REDIS_URL: str = "redis://localhost:6379/0"
     REDIS_PREFIX: str = Field(default="videobot:", description="Redis key prefix")
     REDIS_EXPIRE_TIME: int = Field(default=3600, description="Default Redis expiration time")
     
     # Telegram Bot Configuration
-    BOT_TOKEN: str = Field(description="Telegram bot token from @BotFather")
+    BOT_TOKEN: str
     WEBHOOK_URL: Optional[str] = Field(default=None, description="Webhook URL for production")
     WEBHOOK_PATH: str = Field(default="/webhook", description="Webhook endpoint path")
     WEBHOOK_SECRET: Optional[str] = Field(default=None, description="Webhook secret token")
     BOT_PARSE_MODE: str = Field(default="HTML", description="Default parse mode for messages")
     
     # Security Configuration
-    JWT_SECRET: str = Field(description="JWT secret key for admin authentication")
+    JWT_SECRET: str
     JWT_ALGORITHM: str = Field(default="HS256", description="JWT algorithm")
     JWT_EXPIRE_MINUTES: int = Field(default=60 * 24 * 7, description="JWT token expiration (7 days)")
     RATE_LIMIT_REQUESTS: int = Field(default=10, description="Rate limit requests per minute")
@@ -97,8 +100,8 @@ class Settings(BaseSettings):
     PREMIUM_FILE_RETENTION_HOURS: int = Field(default=720, description="Premium user file retention (30 days)")
     ADMIN_FILE_RETENTION_HOURS: int = Field(default=8760, description="Admin file retention (365 days)")
     
-    CELERY_BROKER_URL: str
-    CELERY_RESULT_BACKEND: str
+    CELERY_BROKER_URL: str = "redis://localhost:6379/0"
+    CELERY_RESULT_BACKEND: str = "redis://localhost:6379/0"
     CELERY_TASK_TIMEOUT: int = Field(default=300, description="Celery task timeout in seconds")
     CELERY_WORKER_CONCURRENCY: int = Field(default=4, description="Celery worker concurrency")
     

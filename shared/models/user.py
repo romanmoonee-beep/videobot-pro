@@ -24,7 +24,7 @@ class User(BaseModel, SoftDeleteMixin):
     """
     
     __tablename__ = "users"
-    
+
     # Основная информация пользователя
     telegram_id: Mapped[int] = mapped_column(
         BigInteger,
@@ -273,10 +273,15 @@ class User(BaseModel, SoftDeleteMixin):
         nullable=True,
         comment="Заметки администрации"
     )
-    
+
+    downloads: Mapped[list["DownloadTask"]] = relationship(
+        "DownloadTask", back_populates="user"
+    )
+
     # Relationships (будут добавлены в других моделях)
     download_batches = relationship("DownloadBatch", back_populates="user")
     download_tasks = relationship("DownloadTask", back_populates="user")
+
 
     payments = relationship("Payment", back_populates="user")
     analytics_events = relationship("AnalyticsEvent", back_populates="user")

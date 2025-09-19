@@ -43,7 +43,7 @@ class BotConfig:
     
     def __init__(self):
         # Основные настройки
-        self.token = settings.BOT_TOKEN
+        self.bot_token = settings.BOT_TOKEN
         self.parse_mode = settings.BOT_PARSE_MODE
         self.webhook_url = settings.WEBHOOK_URL
         self.webhook_path = settings.WEBHOOK_PATH

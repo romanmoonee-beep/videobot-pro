@@ -50,13 +50,7 @@ class DownloadTask(BaseModel):
     )
     
     # Основные данные задачи
-    task_id: Mapped[str] = mapped_column(
-        String(100),
-        unique=True,
-        nullable=False,
-        index=True,
-        comment="Уникальный идентификатор задачи"
-    )
+    task_id: Mapped[str] = mapped_column(String, nullable=False)
     
     original_url: Mapped[str] = mapped_column(
         Text,
@@ -177,7 +171,9 @@ class DownloadTask(BaseModel):
         default=5,
         comment="Приоритет задачи (1-10)"
     )
-    
+
+    user: Mapped["User"] = relationship("User", back_populates="downloads")
+
     # Constraints и индексы
     __table_args__ = (
         CheckConstraint(
