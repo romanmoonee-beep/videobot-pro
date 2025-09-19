@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """
-VideoBot Pro - Database Migration Script
-Создание и применение миграций базы данных
+VideoBot Pro - Database Migration Script (Fixed Version)
+Создание и применение миграций базы данных с правильным управлением асинхронными подключениями
 """
 
 import os
@@ -13,20 +13,21 @@ from pathlib import Path
 project_root = Path(__file__).parent
 sys.path.insert(0, str(project_root))
 
-# ИСПРАВЛЕНО: импортируем только то что нужно
+# Импорты
 try:
     from alembic.config import Config
     from alembic import command
     from sqlalchemy import create_engine, text
     from sqlalchemy.exc import OperationalError
+    import asyncpg
 except ImportError as e:
     print(f"❌ Missing required dependency: {e}")
-    print("Please install: pip install alembic")
+    print("Please install: pip install alembic asyncpg")
     sys.exit(1)
 
 try:
     from shared.config.settings import settings
-    from shared.models import Base, get_models_in_dependency_order
+    from shared.models import Base
 except ImportError as e:
     print(f"❌ Import error: {e}")
     print("Make sure you're in the project root directory")
@@ -34,11 +35,10 @@ except ImportError as e:
 
 
 def create_database_if_not_exists():
-    """Создать базу данных если не существует"""
+    """Создать базу данных если не существует (синхронно)"""
     try:
         # Подключаемся к PostgreSQL без указания БД
         db_url = settings.get_database_url(async_driver=False)
-        # Заменяем название БД на postgres для подключения к серверу
         admin_url = db_url.replace('/videobot', '/postgres')
         
         engine = create_engine(admin_url)
@@ -50,13 +50,14 @@ def create_database_if_not_exists():
             
             if not exists:
                 print("Creating database 'videobot'...")
-                conn.execute(text("COMMIT"))  # Закрываем текущую транзакцию
+                conn.execute(text("COMMIT"))
                 conn.execute(text("CREATE DATABASE videobot"))
                 print("Database 'videobot' created successfully!")
             else:
                 print("Database 'videobot' already exists.")
                 
         engine.dispose()
+        return True
         
     except OperationalError as e:
         print(f"Error creating database: {e}")
@@ -65,12 +66,99 @@ def create_database_if_not_exists():
     except Exception as e:
         print(f"Unexpected error: {e}")
         return False
+
+
+async def create_tables_async():
+    """Создать таблицы асинхронно"""
+    print("Creating tables directly (async)...")
     
-    return True
+    try:
+        # Получаем параметры подключения
+        db_url = settings.get_database_url()
+        
+        # Парсим URL для asyncpg
+        if db_url.startswith('postgresql+asyncpg://'):
+            db_url = db_url.replace('postgresql+asyncpg://', 'postgresql://')
+        
+        print(f"Connecting to: {db_url}")
+        
+        # Подключаемся к базе данных
+        conn = await asyncpg.connect(db_url)
+        print("✅ Connected to database")
+        
+        # Получаем DDL команды для создания таблиц
+        from sqlalchemy import create_engine
+        from sqlalchemy.schema import CreateTable
+        
+        # Создаем временный синхронный движок для генерации DDL
+        temp_engine = create_engine(settings.get_database_url(async_driver=False))
+        
+        # Создаем таблицы
+        tables_created = []
+        for table_name, table in Base.metadata.tables.items():
+            try:
+                # Генерируем CREATE TABLE команду
+                create_ddl = str(CreateTable(table).compile(temp_engine))
+                
+                # Выполняем команду
+                await conn.execute(create_ddl)
+                tables_created.append(table_name)
+                print(f"✅ Created table: {table_name}")
+                
+            except asyncpg.exceptions.DuplicateTableError:
+                print(f"⚠️  Table {table_name} already exists, skipping")
+            except Exception as e:
+                print(f"❌ Error creating table {table_name}: {e}")
+        
+        temp_engine.dispose()
+        
+        # Закрываем соединение
+        await conn.close()
+        print(f"✅ Database setup completed! Created {len(tables_created)} tables.")
+        return True
+        
+    except Exception as e:
+        print(f"❌ Error creating tables: {e}")
+        import traceback
+        traceback.print_exc()
+        return False
+
+
+def create_tables_sync():
+    """Создать таблицы синхронно"""
+    print("Creating tables directly (sync)...")
+    
+    try:
+        # Создаем синхронный движок
+        db_url = settings.get_database_url(async_driver=False)
+        engine = create_engine(db_url, echo=True)
+        
+        # Создаем все таблицы
+        Base.metadata.create_all(engine)
+        
+        # Проверяем созданные таблицы
+        with engine.connect() as conn:
+            result = conn.execute(text("""
+                SELECT table_name 
+                FROM information_schema.tables 
+                WHERE table_schema = 'public'
+            """))
+            tables = [row[0] for row in result.fetchall()]
+            
+        engine.dispose()
+        
+        print(f"✅ Database setup completed! Tables: {', '.join(tables)}")
+        return True
+        
+    except Exception as e:
+        print(f"❌ Error creating tables: {e}")
+        import traceback
+        traceback.print_exc()
+        return False
 
 
 def init_alembic():
-    """Инициализировать Alembic если не инициализирован"""
+    """Инициализировать Alembic"""
     migrations_dir = project_root / "migrations"
     
     if not migrations_dir.exists():
@@ -78,89 +166,12 @@ def init_alembic():
         alembic_cfg = Config("alembic.ini")
         command.init(alembic_cfg, "migrations")
         print("Alembic initialized!")
-        
-        # Создаем env.py с правильной конфигурацией
-        env_py_content = '''from logging.config import fileConfig
-from sqlalchemy import engine_from_config
-from sqlalchemy import pool
-from alembic import context
-import sys
-from pathlib import Path
-
-# Добавляем корневую директорию проекта в путь
-project_root = Path(__file__).parent.parent
-sys.path.insert(0, str(project_root))
-
-from shared.models import Base
-from shared.config.settings import settings
-
-# this is the Alembic Config object, which provides
-# access to the values within the .ini file in use.
-config = context.config
-
-# Interpret the config file for Python logging.
-# This line sets up loggers basically.
-if config.config_file_name is not None:
-    fileConfig(config.config_file_name)
-
-# add your model's MetaData object here
-# for 'autogenerate' support
-target_metadata = Base.metadata
-
-def get_url():
-    return settings.get_database_url(async_driver=False)
-
-def run_migrations_offline() -> None:
-    """Run migrations in 'offline' mode."""
-    url = get_url()
-    context.configure(
-        url=url,
-        target_metadata=target_metadata,
-        literal_binds=True,
-        dialect_opts={"paramstyle": "named"},
-    )
-
-    with context.begin_transaction():
-        context.run_migrations()
-
-def run_migrations_online() -> None:
-    """Run migrations in 'online' mode."""
-    configuration = config.get_section(config.config_ini_section)
-    configuration["sqlalchemy.url"] = get_url()
-    
-    connectable = engine_from_config(
-        configuration,
-        prefix="sqlalchemy.",
-        poolclass=pool.NullPool,
-    )
-
-    with connectable.connect() as connection:
-        context.configure(
-            connection=connection, 
-            target_metadata=target_metadata
-        )
-
-        with context.begin_transaction():
-            context.run_migrations()
-
-if context.is_offline_mode():
-    run_migrations_offline()
-else:
-    run_migrations_online()
-'''
-        
-        env_py_path = migrations_dir / "env.py"
-        with open(env_py_path, 'w', encoding='utf-8') as f:
-            f.write(env_py_content)
-            
-        print("Created migrations/env.py")
 
 
 def create_initial_migration():
     """Создать начальную миграцию"""
     alembic_cfg = Config("alembic.ini")
     
-    # Проверяем есть ли уже миграции
     versions_dir = project_root / "migrations" / "versions"
     if versions_dir.exists() and any(versions_dir.glob("*.py")):
         print("Migrations already exist. Skipping initial migration creation.")
@@ -179,96 +190,77 @@ def apply_migrations():
     print("Migrations applied successfully!")
 
 
-def create_tables_directly():
-    """Создать таблицы напрямую без миграций (для быстрого старта)"""
-    print("Creating tables directly...")
-    try:
-        # ИСПРАВЛЕНО: используем правильные импорты
-        from shared.config.database import init_database, close_database, db_config
-        
-        # Инициализируем подключение
-        asyncio.run(init_database())
-        
-        # Создаем таблицы
-        asyncio.run(db_config.create_all_tables())
-        
-        # Закрываем подключение
-        asyncio.run(close_database())
-        
-        print("All tables created successfully!")
-        return True
-        
-    except Exception as e:
-        print(f"Error creating tables: {e}")
-        return False
-
-
 def main():
     """Главная функция"""
     import argparse
     
-    parser = argparse.ArgumentParser(description="VideoBot Pro Database Migration Tool")
+    parser = argparse.ArgumentParser(description="VideoBot Pro Database Migration Tool (Fixed)")
     parser.add_argument(
         "--mode", 
-        choices=["full", "direct", "migrate-only"], 
-        default="full",
-        help="Migration mode: full (recommended), direct (quick), migrate-only"
+        choices=["full", "direct", "sync", "async", "migrate-only"], 
+        default="sync",
+        help="Migration mode: sync (recommended), async, full, direct, migrate-only"
     )
     
     args = parser.parse_args()
     
-    print("🚀 VideoBot Pro - Database Setup")
-    print("=" * 40)
+    print("🚀 VideoBot Pro - Database Setup (Fixed)")
+    print("=" * 50)
     
     # 1. Создаем БД если не существует
     if not create_database_if_not_exists():
         print("❌ Failed to create database. Exiting.")
         sys.exit(1)
     
-    if args.mode == "direct":
-        # Быстрое создание таблиц без миграций
-        if create_tables_directly():
-            print("✅ Database setup completed (direct mode)!")
-        else:
-            print("❌ Failed to create tables directly.")
-            sys.exit(1)
+    success = False
+    
+    if args.mode == "sync":
+        # Синхронное создание таблиц (рекомендуется)
+        success = create_tables_sync()
+        
+    elif args.mode == "async":
+        # Асинхронное создание таблиц
+        success = asyncio.run(create_tables_async())
+        
+    elif args.mode == "direct":
+        # Пробуем синхронно, затем асинхронно
+        success = create_tables_sync()
+        if not success:
+            print("Trying async method...")
+            success = asyncio.run(create_tables_async())
             
     elif args.mode == "full":
         # Полная настройка с миграциями
         try:
-            # 2. Инициализируем Alembic
             init_alembic()
-            
-            # 3. Создаем начальную миграцию
             create_initial_migration()
-            
-            # 4. Применяем миграции
             apply_migrations()
-            
+            success = True
             print("✅ Database setup completed (full mode)!")
             
         except Exception as e:
             print(f"❌ Error during migration setup: {e}")
-            print("Trying direct table creation as fallback...")
-            if create_tables_directly():
-                print("✅ Database setup completed (fallback mode)!")
-            else:
-                print("❌ All setup methods failed.")
-                sys.exit(1)
+            print("Trying direct table creation...")
+            success = create_tables_sync()
     
     elif args.mode == "migrate-only":
-        # Только применение миграций (если уже настроены)
+        # Только применение миграций
         try:
             apply_migrations()
+            success = True
             print("✅ Migrations applied successfully!")
         except Exception as e:
             print(f"❌ Error applying migrations: {e}")
             sys.exit(1)
     
-    print("\n📋 Next steps:")
-    print("1. Configure your .env file with bot token and settings")
-    print("2. Run: python -m bot.main")
-    print("3. Start using VideoBot Pro!")
+    if success:
+        print("\n📋 Next steps:")
+        print("1. Configure your .env file with bot token and settings")
+        print("2. Run: python -m bot.main")
+        print("3. Start using VideoBot Pro!")
+    else:
+        print("❌ Database setup failed. Check the errors above.")
+        sys.exit(1)
 
 
 if __name__ == "__main__":

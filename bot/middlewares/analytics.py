@@ -13,7 +13,9 @@ from aiogram.types import Message, CallbackQuery, Update, InlineQuery
 
 from shared.config.database import get_async_session
 from shared.models import User, EventType
-from shared.models.analytics import track_user_event, track_system_event
+from shared.models.analytics import track_user_event
+
+from shared.services.analytics import AnalyticsService
 
 logger = structlog.get_logger(__name__)
 
@@ -181,7 +183,7 @@ class AnalyticsMiddleware(BaseMiddleware):
                 
                 # Трекаем производительность
                 if self.track_performance and execution_time > 1.0:
-                    await track_system_event(
+                    await AnalyticsService.track_system_event(
                         event_type=EventType.SLOW_REQUEST,
                         event_data={
                             'user_id': event_info['user_id'],
@@ -198,7 +200,7 @@ class AnalyticsMiddleware(BaseMiddleware):
         """Отправить ошибку в аналитику"""
         try:
             # Отправляем системное событие об ошибке
-            await track_system_event(
+            await AnalyticsService.track_system_event(
                 event_type=EventType.ERROR_OCCURRED,
                 event_data={
                     'user_id': event_info.get('user_id'),

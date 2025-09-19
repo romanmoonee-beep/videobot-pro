@@ -9,6 +9,7 @@ from kombu import Queue
 import structlog
 import os
 import sys
+import time
 from datetime import timedelta
 
 # Добавляем пути для импорта

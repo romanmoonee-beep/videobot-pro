@@ -4,7 +4,7 @@ VideoBot Pro - URL Extractor
 """
 
 import re
-from typing import List, Optional, Tuple
+from typing import List, Optional, Tuple, Dict
 from urllib.parse import urlparse, parse_qs
 import structlog
 
