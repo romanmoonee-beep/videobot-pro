@@ -347,4 +347,4 @@ pip install -r requirements.txt
 # Пересоздание БД
 dropdb videobot && createdb videobot
 python migrate.py --mode=direct
-```
+```# videobot-pro
