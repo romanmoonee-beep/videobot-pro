@@ -1,0 +1,67 @@
+# VideoBot Pro - Python Dependencies
+
+# Core Framework
+aiogram==3.4.1
+aiohttp==3.9.3
+aiofiles==23.2.0
+
+# Database
+SQLAlchemy==2.0.25
+alembic==1.13.1
+asyncpg==0.29.0
+psycopg2-binary==2.9.9
+
+# Redis
+redis==5.0.1
+aioredis==2.0.1
+
+# Configuration & Environment  
+pydantic==2.5.3
+pydantic-settings==2.1.0
+python-dotenv==1.0.0
+
+# Logging
+structlog==23.2.0
+
+# Security & Authentication
+cryptography==42.0.2
+PyJWT==2.8.0
+bcrypt==4.1.2
+
+# HTTP & API clients
+httpx==0.26.0
+requests==2.31.0
+
+# Data Processing
+Pillow==10.2.0
+python-magic==0.4.27
+
+# Date & Time
+python-dateutil==2.8.2
+pytz==2023.4
+
+# Async utilities
+asyncio-throttle==1.0.2
+
+# Media processing (optional)
+yt-dlp==2024.1.4
+
+# Development & Testing (optional)
+pytest==7.4.4
+pytest-asyncio==0.23.3
+pytest-mock==3.12.0
+
+# Monitoring (optional)
+prometheus-client==0.19.0
+
+# Task Queue (optional - for worker)
+celery==5.3.6
+kombu==5.3.5
+
+# File storage (optional)
+boto3==1.34.34
+python-multipart==0.0.6
+
+# Web framework (if using webhook)
+uvicorn==0.27.0
+fastapi==0.109.0
