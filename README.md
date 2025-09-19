@@ -342,6 +342,8 @@ asyncio.run(check())
 pip uninstall -r requirements.txt -y
 pip install -r requirements.txt
 
+,
+
 # Пересоздание БД
 dropdb videobot && createdb videobot
 python migrate.py --mode=direct
