@@ -348,3 +348,4 @@ pip install -r requirements.txt
 dropdb videobot && createdb videobot
 python migrate.py --mode=direct
 ```# videobot-pro
+# videobot-pro
