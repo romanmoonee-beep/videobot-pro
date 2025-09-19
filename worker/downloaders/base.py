@@ -9,25 +9,55 @@ import tempfile
 from abc import ABC, abstractmethod
 from typing import Dict, Any, Optional, Callable, List
 from dataclasses import dataclass
+from datetime import datetime
+from pathlib import Path
 import structlog
 
 logger = structlog.get_logger(__name__)
 
+# Исключения
+class DownloadError(Exception):
+    """Базовая ошибка скачивания"""
+    pass
+
+class UnsupportedPlatformError(DownloadError):
+    """Платформа не поддерживается"""
+    pass
+
+class VideoNotFoundError(DownloadError):
+    """Видео не найдено"""
+    pass
+
+class DownloadTimeoutError(DownloadError):
+    """Таймаут скачивания"""
+    pass
+
+class QualityNotAvailableError(DownloadError):
+    """Качество недоступно"""
+    pass
+
 @dataclass
 class VideoInfo:
     """Информация о видео"""
+    id: str
     title: str
-    author: str
-    duration_seconds: int
+    description: Optional[str] = None
+    uploader: str = "Unknown"
+    duration: int = 0  # в секундах
     view_count: Optional[int] = None
     like_count: Optional[int] = None
-    description: Optional[str] = None
+    upload_date: Optional[datetime] = None
     thumbnail_url: Optional[str] = None
-    upload_date: Optional[str] = None
-    filesize_mb: Optional[float] = None
-    available_qualities: Optional[List[str]] = None
-    is_live: bool = False
-    is_age_restricted: bool = False
+    webpage_url: Optional[str] = None
+    direct_url: Optional[str] = None
+    platform: str = "unknown"
+    quality: Optional[str] = None
+    file_size: Optional[int] = None
+    format_info: Dict[str, Any] = None
+    
+    def __post_init__(self):
+        if self.format_info is None:
+            self.format_info = {}
 
 @dataclass 
 class DownloadResult:
@@ -35,12 +65,13 @@ class DownloadResult:
     success: bool
     file_path: Optional[str] = None
     filename: Optional[str] = None
-    file_size_bytes: Optional[int] = None
-    actual_quality: Optional[str] = None
+    file_size: Optional[int] = None  # в байтах
+    duration: Optional[int] = None  # в секундах
+    quality: Optional[str] = None
     format: Optional[str] = None
-    duration_seconds: Optional[int] = None
-    error_message: Optional[str] = None
+    error: Optional[str] = None
     thumbnail_path: Optional[str] = None
+    video_info: Optional[VideoInfo] = None
 
 class BaseDownloader(ABC):
     """
@@ -58,7 +89,7 @@ class BaseDownloader(ABC):
             temp_dir: Директория для временных файлов
             **kwargs: Дополнительные параметры
         """
-        self.temp_dir = temp_dir or tempfile.gettempdir()
+        self.temp_dir = Path(temp_dir) if temp_dir else Path(tempfile.gettempdir()) / "videobot"
         self.session_cookies = kwargs.get("session_cookies")
         self.user_agent = kwargs.get("user_agent", self._get_default_user_agent())
         self.timeout = kwargs.get("timeout", 300)  # 5 минут
@@ -66,7 +97,7 @@ class BaseDownloader(ABC):
         self.logger = logger.bind(downloader=self.__class__.__name__)
         
         # Обеспечиваем существование временной директории
-        os.makedirs(self.temp_dir, exist_ok=True)
+        self.temp_dir.mkdir(parents=True, exist_ok=True)
     
     @property
     @abstractmethod
@@ -81,9 +112,9 @@ class BaseDownloader(ABC):
         pass
     
     @abstractmethod
-    async def validate_url(self, url: str) -> bool:
+    def can_download(self, url: str) -> bool:
         """
-        Валидация URL для данной платформы
+        Проверка возможности скачивания URL
         
         Args:
             url: URL для проверки
@@ -94,7 +125,7 @@ class BaseDownloader(ABC):
         pass
     
     @abstractmethod
-    async def get_video_info(self, url: str) -> Optional[VideoInfo]:
+    def get_video_info(self, url: str) -> VideoInfo:
         """
         Получение информации о видео
         
@@ -102,16 +133,19 @@ class BaseDownloader(ABC):
             url: URL видео
             
         Returns:
-            Информация о видео или None при ошибке
+            Информация о видео
+            
+        Raises:
+            DownloadError: При ошибке получения информации
         """
         pass
     
     @abstractmethod
-    async def download_video(
+    def download_video(
         self,
-        url: str,
-        quality: str = "auto",
-        format_preference: str = "mp4",
+        video_info: VideoInfo,
+        output_path: str,
+        quality: str = "best",
         progress_callback: Optional[Callable] = None,
         **kwargs
     ) -> DownloadResult:
@@ -119,16 +153,36 @@ class BaseDownloader(ABC):
         Скачивание видео
         
         Args:
-            url: URL видео
-            quality: Желаемое качество (auto, 480p, 720p, 1080p, 4K)
-            format_preference: Предпочтительный формат
+            video_info: Информация о видео
+            output_path: Путь для сохранения файла
+            quality: Желаемое качество
             progress_callback: Функция для отслеживания прогресса
             **kwargs: Дополнительные параметры
             
         Returns:
             Результат скачивания
+            
+        Raises:
+            DownloadError: При ошибке скачивания
         """
         pass
+    
+    def get_available_qualities(self, url: str) -> List[str]:
+        """
+        Получение доступных качеств видео
+        
+        Args:
+            url: URL видео
+            
+        Returns:
+            Список доступных качеств
+        """
+        try:
+            video_info = self.get_video_info(url)
+            # Базовая реализация - переопределяется в наследниках
+            return ["best", "worst"]
+        except Exception:
+            return ["best"]
     
     def _get_default_user_agent(self) -> str:
         """Получить User-Agent по умолчанию"""
@@ -157,7 +211,7 @@ class BaseDownloader(ABC):
         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
         
         filename = f"{self.platform_name}_{timestamp}_{url_hash}.{extension}"
-        return os.path.join(self.temp_dir, filename)
+        return str(self.temp_dir / filename)
     
     def _normalize_quality(self, quality: str) -> str:
         """
@@ -351,7 +405,7 @@ class BaseDownloader(ABC):
         
         try:
             for pattern in file_patterns:
-                files = glob.glob(os.path.join(self.temp_dir, pattern))
+                files = glob.glob(str(self.temp_dir / pattern))
                 for file_path in files:
                     try:
                         os.remove(file_path)
@@ -360,6 +414,14 @@ class BaseDownloader(ABC):
                         pass
         except Exception as e:
             self.logger.warning(f"Error cleaning temp files: {e}")
+    
+    def cleanup(self):
+        """Очистка ресурсов downloader'а"""
+        try:
+            # Очищаем временные файлы
+            asyncio.create_task(self.cleanup_temp_files())
+        except Exception as e:
+            self.logger.warning(f"Error during cleanup: {e}")
     
     def __str__(self) -> str:
         return f"{self.__class__.__name__}(platform={self.platform_name})"
@@ -370,3 +432,15 @@ class BaseDownloader(ABC):
             f"platform={self.platform_name}, "
             f"temp_dir={self.temp_dir})"
         )
+
+# Экспорт всех классов и исключений
+__all__ = [
+    'BaseDownloader',
+    'VideoInfo', 
+    'DownloadResult',
+    'DownloadError',
+    'UnsupportedPlatformError',
+    'VideoNotFoundError', 
+    'DownloadTimeoutError',
+    'QualityNotAvailableError',
+]
