@@ -15,118 +15,198 @@ from datetime import timedelta
 # Добавляем пути для импорта
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from shared.config.settings import settings
-from worker.config import worker_config
+try:
+    from shared.config.settings import settings
+    from worker.config import worker_config
+except ImportError as e:
+    print(f"Warning: Could not import settings: {e}")
+    # Fallback значения
+    class FallbackSettings:
+        CELERY_BROKER_URL = "redis://localhost:6379/0"
+        CELERY_RESULT_BACKEND = "redis://localhost:6379/0"
+    
+    class FallbackWorkerConfig:
+        soft_timeout = 1500
+        task_timeout = 1800
+        prefetch_multiplier = 1
+        max_tasks_per_child = 1000
+        max_memory_per_child = 200
+        worker_name = "videobot-worker"
+        worker_concurrency = 4
+        worker_pool = "prefork"
+        temp_dir = "/tmp/videobot"
+    
+    settings = FallbackSettings()
+    worker_config = FallbackWorkerConfig()
 
 logger = structlog.get_logger(__name__)
 
-# Создание Celery приложения
-celery_app = Celery(
-    'videobot_worker',
-    broker=settings.CELERY_BROKER_URL,
-    backend=settings.CELERY_RESULT_BACKEND,
-    include=[
-        'worker.tasks.download_tasks',
-        'worker.tasks.batch_tasks', 
-        'worker.tasks.cleanup_tasks',
-        'worker.tasks.analytics_tasks',
-        'worker.tasks.notification_tasks',
-    ]
-)
+def create_celery_app(app_name: str = 'videobot_worker', **kwargs) -> Celery:
+    """
+    Создать и настроить Celery приложение
+    
+    Args:
+        app_name: Имя приложения
+        **kwargs: Дополнительные настройки
+        
+    Returns:
+        Настроенное Celery приложение
+    """
+    broker_url = kwargs.get('broker_url', settings.CELERY_BROKER_URL)
+    result_backend = kwargs.get('result_backend', settings.CELERY_RESULT_BACKEND)
+    
+    app = Celery(
+        app_name,
+        broker=broker_url,
+        backend=result_backend,
+        include=[
+            'worker.tasks.download_tasks',
+            'worker.tasks.batch_tasks', 
+            'worker.tasks.cleanup_tasks',
+            'worker.tasks.analytics_tasks',
+            'worker.tasks.notification_tasks',
+        ]
+    )
+    
+    # Применяем конфигурацию
+    app.conf.update(get_celery_config(**kwargs))
+    
+    return app
 
-# Конфигурация Celery
-celery_app.conf.update(
-    # Настройки задач
-    task_serializer='json',
-    accept_content=['json'],
-    result_serializer='json',
-    timezone='UTC',
-    enable_utc=True,
+def get_celery_config(**kwargs) -> dict:
+    """
+    Получить конфигурацию для Celery
     
-    # Timeouts
-    task_soft_time_limit=worker_config.soft_timeout,
-    task_time_limit=worker_config.task_timeout,
-    
-    # Worker настройки
-    worker_prefetch_multiplier=worker_config.prefetch_multiplier,
-    worker_max_tasks_per_child=worker_config.max_tasks_per_child,
-    worker_max_memory_per_child=worker_config.max_memory_per_child,
-    
-    # Retry настройки
-    task_acks_late=True,
-    task_reject_on_worker_lost=True,
-    
-    # Результаты
-    result_expires=3600,  # 1 час
-    result_persistent=True,
-    
-    # Мониторинг
-    worker_send_task_events=True,
-    task_send_sent_event=True,
-    
-    # Маршрутизация задач по очередям
-    task_routes={
-        'worker.tasks.download_tasks.*': {'queue': 'downloads'},
-        'worker.tasks.batch_tasks.*': {'queue': 'batch'},
-        'worker.tasks.cleanup_tasks.*': {'queue': 'cleanup'},
-        'worker.tasks.analytics_tasks.*': {'queue': 'analytics'},
-        'worker.tasks.notification_tasks.*': {'queue': 'notifications'},
-    },
-    
-    # Определение очередей
-    task_default_queue='default',
-    task_queues=(
-        Queue('default', routing_key='default'),
-        Queue('downloads', routing_key='downloads'),
-        Queue('batch', routing_key='batch'),
-        Queue('cleanup', routing_key='cleanup'),
-        Queue('analytics', routing_key='analytics'),
-        Queue('notifications', routing_key='notifications'),
-        Queue('priority', routing_key='priority'),  # Для приоритетных задач
-    ),
-    
-    # Приоритеты очередей
-    task_queue_priority={
-        'priority': 10,
-        'downloads': 7,
-        'batch': 5,
-        'notifications': 3,
-        'analytics': 2,
-        'cleanup': 1,
-    },
-    
-    # Beat scheduler (для периодических задач)
-    beat_schedule={
-        'cleanup-temp-files': {
-            'task': 'worker.tasks.cleanup_tasks.cleanup_temp_files',
-            'schedule': timedelta(hours=1),
+    Args:
+        **kwargs: Дополнительные настройки
+        
+    Returns:
+        Словарь с настройками
+    """
+    return {
+        # Настройки задач
+        'task_serializer': 'json',
+        'accept_content': ['json'],
+        'result_serializer': 'json',
+        'timezone': 'UTC',
+        'enable_utc': True,
+        
+        # Timeouts
+        'task_soft_time_limit': kwargs.get('soft_timeout', worker_config.soft_timeout),
+        'task_time_limit': kwargs.get('task_timeout', worker_config.task_timeout),
+        
+        # Worker настройки
+        'worker_prefetch_multiplier': kwargs.get('prefetch_multiplier', worker_config.prefetch_multiplier),
+        'worker_max_tasks_per_child': kwargs.get('max_tasks_per_child', worker_config.max_tasks_per_child),
+        'worker_max_memory_per_child': kwargs.get('max_memory_per_child', worker_config.max_memory_per_child),
+        
+        # Retry настройки
+        'task_acks_late': True,
+        'task_reject_on_worker_lost': True,
+        
+        # Результаты
+        'result_expires': 3600,  # 1 час
+        'result_persistent': True,
+        
+        # Мониторинг
+        'worker_send_task_events': True,
+        'task_send_sent_event': True,
+        
+        # Маршрутизация задач по очередям
+        'task_routes': {
+            'worker.tasks.download_tasks.*': {'queue': 'downloads'},
+            'worker.tasks.batch_tasks.*': {'queue': 'batch'},
+            'worker.tasks.cleanup_tasks.*': {'queue': 'cleanup'},
+            'worker.tasks.analytics_tasks.*': {'queue': 'analytics'},
+            'worker.tasks.notification_tasks.*': {'queue': 'notifications'},
         },
-        'cleanup-old-downloads': {
-            'task': 'worker.tasks.cleanup_tasks.cleanup_old_downloads',
-            'schedule': timedelta(hours=6),
+        
+        # Определение очередей
+        'task_default_queue': 'default',
+        'task_queues': (
+            Queue('default', routing_key='default'),
+            Queue('downloads', routing_key='downloads'),
+            Queue('batch', routing_key='batch'),
+            Queue('cleanup', routing_key='cleanup'),
+            Queue('analytics', routing_key='analytics'),
+            Queue('notifications', routing_key='notifications'),
+            Queue('priority', routing_key='priority'),  # Для приоритетных задач
+        ),
+        
+        # Приоритеты очередей
+        'task_queue_priority': {
+            'priority': 10,
+            'downloads': 7,
+            'batch': 5,
+            'notifications': 3,
+            'analytics': 2,
+            'cleanup': 1,
         },
-        'update-daily-analytics': {
-            'task': 'worker.tasks.analytics_tasks.update_daily_analytics',
-            'schedule': timedelta(hours=1),
+        
+        # Beat scheduler (для периодических задач)
+        'beat_schedule': {
+            'cleanup-temp-files': {
+                'task': 'worker.tasks.cleanup_tasks.cleanup_temp_files',
+                'schedule': timedelta(hours=1),
+            },
+            'cleanup-old-downloads': {
+                'task': 'worker.tasks.cleanup_tasks.cleanup_old_files',
+                'schedule': timedelta(hours=6),
+            },
+            'update-daily-analytics': {
+                'task': 'worker.tasks.analytics_tasks.process_analytics_events',
+                'schedule': timedelta(hours=1),
+            },
+            'health-check': {
+                'task': 'worker.tasks.cleanup_tasks.health_check_task',
+                'schedule': timedelta(minutes=5),
+            },
+            'storage-cleanup': {
+                'task': 'worker.tasks.cleanup_tasks.cleanup_expired_cdn_links',
+                'schedule': timedelta(hours=12),
+            },
         },
-        'health-check': {
-            'task': 'worker.tasks.analytics_tasks.worker_health_check',
-            'schedule': timedelta(minutes=5),
-        },
-        'storage-cleanup': {
-            'task': 'worker.tasks.cleanup_tasks.cleanup_expired_files',
-            'schedule': timedelta(hours=12),
-        },
-    },
+        
+        # Дополнительные настройки
+        'worker_disable_rate_limits': True,
+        'task_ignore_result': False,
+        
+        # Логирование
+        'worker_log_format': '[%(asctime)s: %(levelname)s/%(name)s] %(message)s',
+        'worker_task_log_format': '[%(asctime)s: %(levelname)s/%(name)s][%(task_name)s(%(task_id)s)] %(message)s',
+    }
+
+def validate_celery_config() -> bool:
+    """
+    Валидация конфигурации Celery
     
-    # Дополнительные настройки
-    worker_disable_rate_limits=True,
-    task_ignore_result=False,
-    
-    # Логирование
-    worker_log_format='[%(asctime)s: %(levelname)s/%(name)s] %(message)s',
-    worker_task_log_format='[%(asctime)s: %(levelname)s/%(name)s][%(task_name)s(%(task_id)s)] %(message)s',
-)
+    Returns:
+        True если конфигурация валидна
+    """
+    try:
+        # Проверяем доступность брокера
+        if not hasattr(settings, 'CELERY_BROKER_URL'):
+            logger.error("CELERY_BROKER_URL not configured")
+            return False
+            
+        # Проверяем доступность backend'а
+        if not hasattr(settings, 'CELERY_RESULT_BACKEND'):
+            logger.error("CELERY_RESULT_BACKEND not configured")
+            return False
+            
+        # Проверяем worker конфигурацию
+        if not hasattr(worker_config, 'worker_name'):
+            logger.warning("Worker name not configured, using default")
+            
+        logger.info("Celery configuration validation passed")
+        return True
+        
+    except Exception as e:
+        logger.error(f"Celery configuration validation failed: {e}")
+        return False
+
+# Создание основного Celery приложения
+celery_app = create_celery_app()
 
 # Обработчики сигналов Celery
 
@@ -135,29 +215,28 @@ def worker_ready_handler(sender=None, **kwargs):
     """Обработчик готовности worker'а"""
     logger.info(
         "Worker ready",
-        worker_name=worker_config.worker_name,
-        concurrency=worker_config.worker_concurrency,
-        pool=worker_config.worker_pool
+        worker_name=getattr(worker_config, 'worker_name', 'unknown'),
+        concurrency=getattr(worker_config, 'worker_concurrency', 1),
+        pool=getattr(worker_config, 'worker_pool', 'prefork')
     )
     
     # Проверяем конфигурацию
-    from worker.config import validate_config
-    errors = validate_config()
-    if errors:
-        logger.error("Configuration errors detected", errors=errors)
+    if not validate_celery_config():
+        logger.error("Configuration validation failed")
     else:
         logger.info("Worker configuration is valid")
 
 @worker_shutdown.connect
 def worker_shutdown_handler(sender=None, **kwargs):
     """Обработчик завершения работы worker'а"""
-    logger.info("Worker shutting down", worker_name=worker_config.worker_name)
+    logger.info("Worker shutting down", worker_name=getattr(worker_config, 'worker_name', 'unknown'))
     
     # Очищаем временные файлы
     try:
         import shutil
-        if worker_config.temp_dir.exists():
-            shutil.rmtree(worker_config.temp_dir, ignore_errors=True)
+        temp_dir = getattr(worker_config, 'temp_dir', '/tmp/videobot')
+        if os.path.exists(temp_dir):
+            shutil.rmtree(temp_dir, ignore_errors=True)
         logger.info("Temporary files cleaned up")
     except Exception as e:
         logger.error("Error cleaning up temporary files", error=str(e))
@@ -168,7 +247,7 @@ def task_prerun_handler(sender=None, task_id=None, task=None, args=None, kwargs=
     logger.info(
         "Task started",
         task_id=task_id,
-        task_name=task.name,
+        task_name=task.name if task else "unknown",
         args_count=len(args) if args else 0,
         kwargs_keys=list(kwargs.keys()) if kwargs else []
     )
@@ -180,7 +259,7 @@ def task_postrun_handler(sender=None, task_id=None, task=None, args=None, kwargs
     logger.info(
         "Task completed",
         task_id=task_id,
-        task_name=task.name,
+        task_name=task.name if task else "unknown",
         state=state,
         success=(state == 'SUCCESS')
     )
@@ -196,39 +275,14 @@ def task_failure_handler(sender=None, task_id=None, exception=None, traceback=No
         exception_type=type(exception).__name__
     )
 
-# Middleware для мониторинга производительности
-class TaskPerformanceMiddleware:
-    """Middleware для отслеживания производительности задач"""
-    
-    def __init__(self, get_response=None):
-        self.get_response = get_response
-        
-    def __call__(self, request):
-        # Логика до выполнения задачи
-        start_time = time.time()
-        
-        response = self.get_response(request) if self.get_response else None
-        
-        # Логика после выполнения задачи
-        duration = time.time() - start_time
-        
-        if duration > 60:  # Задачи дольше минуты
-            logger.warning(
-                "Long running task detected",
-                duration=duration,
-                task_name=getattr(request, 'task_name', 'unknown')
-            )
-        
-        return response
-
 # Функции для управления Celery
 
 def start_worker(concurrency=None, pool=None, queues=None, loglevel='INFO'):
     """Запуск worker'а программно"""
     from celery.bin import worker
     
-    concurrency = concurrency or worker_config.worker_concurrency
-    pool = pool or worker_config.worker_pool
+    concurrency = concurrency or getattr(worker_config, 'worker_concurrency', 4)
+    pool = pool or getattr(worker_config, 'worker_pool', 'prefork')
     queues = queues or ['default', 'downloads', 'batch', 'cleanup', 'analytics', 'notifications']
     
     worker_instance = worker.worker(app=celery_app)
@@ -239,7 +293,7 @@ def start_worker(concurrency=None, pool=None, queues=None, loglevel='INFO'):
         'queues': queues,
         'loglevel': loglevel,
         'traceback': True,
-        'hostname': f"{worker_config.worker_name}@%h",
+        'hostname': f"{getattr(worker_config, 'worker_name', 'worker')}@%h",
     }
     
     logger.info("Starting Celery worker", **options)
@@ -279,49 +333,71 @@ def start_flower(port=5555):
 
 def inspect_workers():
     """Инспекция активных worker'ов"""
-    inspect = celery_app.control.inspect()
-    
-    return {
-        'active': inspect.active(),
-        'scheduled': inspect.scheduled(), 
-        'reserved': inspect.reserved(),
-        'stats': inspect.stats(),
-        'registered': inspect.registered(),
-    }
+    try:
+        inspect = celery_app.control.inspect()
+        
+        return {
+            'active': inspect.active(),
+            'scheduled': inspect.scheduled(), 
+            'reserved': inspect.reserved(),
+            'stats': inspect.stats(),
+            'registered': inspect.registered(),
+        }
+    except Exception as e:
+        logger.error(f"Error inspecting workers: {e}")
+        return {}
 
 def purge_queue(queue_name):
     """Очистка очереди"""
-    with celery_app.pool.acquire(block=True) as conn:
-        return celery_app.control.purge()
+    try:
+        with celery_app.pool.acquire(block=True) as conn:
+            return celery_app.control.purge()
+    except Exception as e:
+        logger.error(f"Error purging queue {queue_name}: {e}")
+        return False
 
 def get_queue_length(queue_name):
     """Получить длину очереди"""
-    with celery_app.connection() as conn:
-        return conn.default_channel.queue_declare(
-            queue=queue_name, passive=True
-        ).message_count
+    try:
+        with celery_app.connection() as conn:
+            return conn.default_channel.queue_declare(
+                queue=queue_name, passive=True
+            ).message_count
+    except Exception as e:
+        logger.error(f"Error getting queue length for {queue_name}: {e}")
+        return 0
 
 # Утилиты для задач
 
 def get_task_info(task_id):
     """Получить информацию о задаче"""
-    result = celery_app.AsyncResult(task_id)
-    return {
-        'id': task_id,
-        'state': result.state,
-        'result': result.result,
-        'traceback': result.traceback,
-        'info': result.info,
-    }
+    try:
+        result = celery_app.AsyncResult(task_id)
+        return {
+            'id': task_id,
+            'state': result.state,
+            'result': result.result,
+            'traceback': result.traceback,
+            'info': result.info,
+        }
+    except Exception as e:
+        logger.error(f"Error getting task info for {task_id}: {e}")
+        return {'id': task_id, 'error': str(e)}
 
 def cancel_task(task_id):
     """Отменить задачу"""
-    celery_app.control.revoke(task_id, terminate=True)
+    try:
+        celery_app.control.revoke(task_id, terminate=True)
+        return True
+    except Exception as e:
+        logger.error(f"Error cancelling task {task_id}: {e}")
+        return False
 
 def retry_failed_tasks():
     """Повторить неудачные задачи"""
     # Эта функция будет реализована в tasks
-    pass
+    logger.info("Retry failed tasks functionality not implemented yet")
+    return False
 
 # Настройка логирования для Celery
 import logging
@@ -340,19 +416,30 @@ def setup_logging():
     )
     
     # Handler для файла
-    if not os.path.exists('/var/log/videobot'):
-        os.makedirs('/var/log/videobot', exist_ok=True)
+    log_dir = '/var/log/videobot'
+    if not os.path.exists(log_dir):
+        try:
+            os.makedirs(log_dir, exist_ok=True)
+        except OSError:
+            # Если не можем создать /var/log/videobot, используем /tmp
+            log_dir = '/tmp'
         
-    file_handler = logging.FileHandler('/var/log/videobot/worker.log')
+    file_handler = logging.FileHandler(f'{log_dir}/worker.log')
     file_handler.setFormatter(formatter)
     celery_logger.addHandler(file_handler)
 
 # Инициализация при импорте
-setup_logging()
+try:
+    setup_logging()
+except Exception as e:
+    print(f"Warning: Could not setup logging: {e}")
 
 # Экспорт основных объектов
 __all__ = [
     'celery_app',
+    'create_celery_app',
+    'validate_celery_config',
+    'get_celery_config',
     'start_worker', 
     'start_beat',
     'start_flower',
@@ -360,3 +447,5 @@ __all__ = [
     'get_task_info',
     'cancel_task',
 ]
+
+print(f"🚀 VideoBot Pro Celery App initialized")

@@ -4,11 +4,13 @@ VideoBot Pro - Worker Configuration
 """
 
 import os
+import tempfile
 from pathlib import Path
-from typing import Dict, Any, List
-from dataclasses import dataclass
+from dataclasses import dataclass, field
+from typing import Dict, Any, Optional
+import structlog
 
-from shared.config.settings import settings
+logger = structlog.get_logger(__name__)
 
 @dataclass
 class WorkerConfig:
@@ -16,303 +18,266 @@ class WorkerConfig:
     
     # Основные настройки
     worker_name: str = "videobot-worker"
-    worker_concurrency: int = settings.CELERY_WORKER_CONCURRENCY
-    worker_pool: str = "prefork"  # prefork, eventlet, gevent
+    worker_concurrency: int = 4
+    worker_pool: str = "prefork"  # prefork, eventlet, gevent, solo
     
-    # Временные ограничения
-    task_timeout: int = settings.CELERY_TASK_TIMEOUT
-    soft_timeout: int = settings.CELERY_TASK_TIMEOUT - 60
-    download_timeout: int = 1800  # 30 минут на скачивание
+    # Таймауты
+    task_timeout: int = 1800  # 30 минут
+    soft_timeout: int = 1500  # 25 минут
     
-    # Ограничения ресурсов
-    max_memory_per_child: int = 1024 * 1024 * 512  # 512MB
-    max_tasks_per_child: int = 100
+    # Настройки производительности
     prefetch_multiplier: int = 1
+    max_tasks_per_child: int = 1000
+    max_memory_per_child: int = 200  # MB
     
     # Директории
-    temp_dir: Path = Path("/tmp/videobot")
-    download_dir: Path = Path("/tmp/videobot/downloads")
-    processing_dir: Path = Path("/tmp/videobot/processing")
+    base_dir: str = field(default_factory=lambda: str(Path.cwd() / "worker_data"))
+    temp_dir: str = field(default_factory=lambda: tempfile.gettempdir())
+    download_temp_dir: str = field(default_factory=lambda: str(Path(tempfile.gettempdir()) / "videobot_downloads"))
     
-    # Качество и форматы
-    default_quality: str = "720p"
-    fallback_quality: str = "480p"
-    supported_formats: List[str] = None
-    max_file_size_mb: int = 2048  # 2GB
+    # Настройки файлов
+    max_file_size_mb: int = 500
+    cleanup_after_hours: int = 24
     
-    # Мониторинг
-    enable_monitoring: bool = True
-    metrics_port: int = 9091
-    health_check_interval: int = 30
-    
-    # Retry настройки
-    max_retries: int = 3
-    retry_delay: int = 60  # секунды
-    exponential_backoff: bool = True
-    
-    # CDN и storage
-    cdn_upload_enabled: bool = True
-    cdn_upload_timeout: int = 300
-    storage_cleanup_enabled: bool = True
-    
-    # Безопасность
-    validate_urls: bool = True
-    scan_for_malware: bool = False
-    max_url_length: int = 2000
+    # Настройки хранилища
+    local_storage_path: str = field(default_factory=lambda: str(Path.cwd() / "storage"))
     
     def __post_init__(self):
-        """Пост-инициализация для настройки"""
-        if self.supported_formats is None:
-            self.supported_formats = ["mp4", "webm", "mp3"]
-            
-        # Создаем директории если их нет
-        self.temp_dir.mkdir(parents=True, exist_ok=True)
-        self.download_dir.mkdir(parents=True, exist_ok=True)
-        self.processing_dir.mkdir(parents=True, exist_ok=True)
-        
-        # Переопределяем из переменных окружения
-        self.worker_concurrency = int(os.getenv("WORKER_CONCURRENCY", self.worker_concurrency))
-        self.max_file_size_mb = int(os.getenv("MAX_FILE_SIZE_MB", self.max_file_size_mb))
+        """Инициализация после создания"""
+        # Создаем директории
+        try:
+            Path(self.base_dir).mkdir(parents=True, exist_ok=True)
+            Path(self.download_temp_dir).mkdir(parents=True, exist_ok=True)
+            Path(self.local_storage_path).mkdir(parents=True, exist_ok=True)
+        except Exception as e:
+            logger.warning(f"Could not create worker directories: {e}")
+    
+    @property
+    def LOCAL_STORAGE_PATH(self) -> str:
+        """Свойство для совместимости с существующим кодом"""
+        return self.local_storage_path
+    
+    @property
+    def MAX_FILE_SIZE_MB(self) -> int:
+        """Свойство для совместимости с существующим кодом"""
+        return self.max_file_size_mb
 
-class DownloaderConfig:
-    """Конфигурация для downloaders"""
-    
-    # YouTube настройки
-    YOUTUBE_CONFIG = {
-        "extract_flat": False,
-        "writesubtitles": False,
-        "writeautomaticsub": False,
-        "ignoreerrors": True,
-        "no_warnings": True,
-        "extractaudio": False,
-        "audioformat": "mp3",
-        "audioquality": "192",
-        "format": "best[height<=?{quality}][ext=mp4]/best[ext=mp4]/best",
-        "merge_output_format": "mp4",
-        "postprocessors": [
-            {
-                "key": "FFmpegVideoConvertor",
-                "preferedformat": "mp4",
-            }
-        ],
-        "cookiefile": None,  # Путь к cookies если нужно
-        "user_agent": settings.USER_AGENT,
-        "socket_timeout": 60,
-        "retries": 3,
-    }
-    
-    # TikTok настройки
-    TIKTOK_CONFIG = {
-        "extract_flat": False,
-        "writesubtitles": False,
-        "ignoreerrors": True,
-        "no_warnings": True,
-        "format": "best[ext=mp4]/best",
-        "merge_output_format": "mp4",
-        "user_agent": "Mozilla/5.0 (iPhone; CPU iPhone OS 15_0 like Mac OS X) AppleWebKit/605.1.15",
-        "http_headers": {
-            "Referer": "https://www.tiktok.com/",
-            "Accept-Language": "en-US,en;q=0.9",
-        },
-        "extractor_args": {
-            "tiktok": {
-                "webpage_download": True,
-            }
-        },
-        "socket_timeout": 30,
-        "retries": 5,
-    }
-    
-    # Instagram настройки
-    INSTAGRAM_CONFIG = {
-        "extract_flat": False,
-        "writesubtitles": False,
-        "ignoreerrors": True,
-        "no_warnings": True,
-        "format": "best[ext=mp4]/best",
-        "merge_output_format": "mp4",
-        "user_agent": "Instagram 123.0.0.21.114 (iPhone; CPU iPhone OS 13_3 like Mac OS X)",
-        "http_headers": {
-            "Accept-Language": "en-US,en;q=0.9",
-        },
-        "socket_timeout": 45,
-        "retries": 3,
-    }
-    
-    @classmethod
-    def get_config_for_platform(cls, platform: str, quality: str = "720p") -> Dict[str, Any]:
-        """Получить конфигурацию для платформы"""
-        configs = {
-            "youtube": cls.YOUTUBE_CONFIG.copy(),
-            "tiktok": cls.TIKTOK_CONFIG.copy(),
-            "instagram": cls.INSTAGRAM_CONFIG.copy(),
-        }
-        
-        config = configs.get(platform, {})
-        
-        # Настраиваем качество для YouTube
-        if platform == "youtube" and "format" in config:
-            quality_num = quality.replace("p", "") if quality.endswith("p") else quality
-            config["format"] = config["format"].format(quality=quality_num)
-        
-        return config
-
-class StorageConfig:
-    """Конфигурация для storage providers"""
-    
-    # Wasabi S3 (основное хранилище)
-    WASABI_CONFIG = {
-        "endpoint_url": settings.WASABI_ENDPOINT,
-        "aws_access_key_id": settings.WASABI_ACCESS_KEY,
-        "aws_secret_access_key": settings.WASABI_SECRET_KEY,
-        "region_name": settings.WASABI_REGION,
-        "bucket_name": settings.WASABI_BUCKET_NAME,
-        "use_ssl": True,
-        "verify": True,
-        "timeout": 300,
-        "max_pool_connections": 50,
-    }
-    
-    # Backblaze B2 (backup)
-    BACKBLAZE_CONFIG = {
-        "key_id": settings.B2_KEY_ID,
-        "application_key": settings.B2_APPLICATION_KEY,
-        "bucket_name": settings.B2_BUCKET_NAME,
-        "timeout": 300,
-    }
-    
-    # DigitalOcean Spaces
-    DIGITALOCEAN_CONFIG = {
-        "endpoint_url": "https://fra1.digitaloceanspaces.com",  # Можно вынести в settings
-        "aws_access_key_id": os.getenv("DO_SPACES_KEY", ""),
-        "aws_secret_access_key": os.getenv("DO_SPACES_SECRET", ""),
-        "region_name": "fra1",
-        "bucket_name": os.getenv("DO_SPACES_BUCKET", "videobot-files"),
-    }
-    
-    # Локальное хранилище
-    LOCAL_CONFIG = {
-        "base_path": Path("/var/www/videobot/files"),
-        "create_subdirs": True,
-        "permissions": 0o644,
-        "url_prefix": "https://files.videobot.com",
-    }
-
-class ProcessorConfig:
-    """Конфигурация для процессоров"""
-    
-    # FFmpeg настройки
-    FFMPEG_CONFIG = {
-        "binary_path": "ffmpeg",
-        "audio_codec": "aac",
-        "video_codec": "libx264",
-        "audio_bitrate": "128k",
-        "video_bitrate": "1000k",
-        "preset": "fast",
-        "tune": "zerolatency",
-        "profile": "baseline",
-        "level": "3.0",
-        "threads": 2,
-    }
-    
-    # Настройки thumbnail
-    THUMBNAIL_CONFIG = {
-        "width": 320,
-        "height": 180,
-        "quality": 85,
-        "format": "jpg",
-        "seek_time": "00:00:03",  # Берем кадр с 3-й секунды
-    }
-    
-    # Оптимизация качества
-    QUALITY_CONFIG = {
-        "4k": {"width": 3840, "height": 2160, "bitrate": "8000k"},
-        "2160p": {"width": 3840, "height": 2160, "bitrate": "8000k"},
-        "1440p": {"width": 2560, "height": 1440, "bitrate": "4000k"},
-        "1080p": {"width": 1920, "height": 1080, "bitrate": "2500k"},
-        "720p": {"width": 1280, "height": 720, "bitrate": "1500k"},
-        "480p": {"width": 854, "height": 480, "bitrate": "800k"},
-        "360p": {"width": 640, "height": 360, "bitrate": "400k"},
-    }
-
-# Глобальные экземпляры конфигураций
+# Создаем глобальный экземпляр конфигурации
 worker_config = WorkerConfig()
-downloader_config = DownloaderConfig()
-storage_config = StorageConfig()
-processor_config = ProcessorConfig()
 
-# Функции для получения конфигураций
-def get_worker_config() -> WorkerConfig:
-    """Получить конфигурацию worker'а"""
-    return worker_config
-
-def get_downloader_config(platform: str, quality: str = "720p") -> Dict[str, Any]:
-    """Получить конфигурацию downloader'а"""
-    return downloader_config.get_config_for_platform(platform, quality)
-
-def get_storage_config(provider: str) -> Dict[str, Any]:
-    """Получить конфигурацию storage provider'а"""
-    configs = {
-        "wasabi": storage_config.WASABI_CONFIG,
-        "backblaze": storage_config.BACKBLAZE_CONFIG,
-        "digitalocean": storage_config.DIGITALOCEAN_CONFIG,
-        "local": storage_config.LOCAL_CONFIG,
+def get_downloader_config(platform: str = None) -> Dict[str, Any]:
+    """
+    Получить конфигурацию для downloaders
+    
+    Args:
+        platform: Платформа (youtube, tiktok, instagram)
+        
+    Returns:
+        Словарь с конфигурацией
+    """
+    base_config = {
+        'temp_dir': worker_config.download_temp_dir,
+        'max_file_size_mb': worker_config.max_file_size_mb,
+        'timeout': worker_config.soft_timeout,
+        'user_agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121.0.0.0 Safari/537.36'
     }
-    return configs.get(provider, {})
-
-def get_processor_config(processor_type: str = "ffmpeg") -> Dict[str, Any]:
-    """Получить конфигурацию процессора"""
-    configs = {
-        "ffmpeg": processor_config.FFMPEG_CONFIG,
-        "thumbnail": processor_config.THUMBNAIL_CONFIG,
-        "quality": processor_config.QUALITY_CONFIG,
+    
+    # Платформо-специфичные настройки
+    platform_configs = {
+        'youtube': {
+            'extract_flat': False,
+            'writesubtitles': False,
+            'writeautomaticsub': False,
+            'format': 'best[ext=mp4]/best',
+        },
+        'tiktok': {
+            'api_endpoints': [
+                "https://api.tikmate.app",
+                "https://tikdown.org/api",
+                "https://ssstik.io/abc",
+            ]
+        },
+        'instagram': {
+            'session_cookies': None,
+            'use_api': True,
+        }
     }
-    return configs.get(processor_type, {})
+    
+    if platform and platform in platform_configs:
+        base_config.update(platform_configs[platform])
+    
+    return base_config
+
+def get_storage_config(storage_type: str) -> Dict[str, Any]:
+    """
+    Получить конфигурацию для хранилища
+    
+    Args:
+        storage_type: Тип хранилища (wasabi, backblaze, digitalocean, local)
+        
+    Returns:
+        Словарь с конфигурацией
+    """
+    configs = {
+        'wasabi': {
+            'endpoint_url': os.getenv('WASABI_ENDPOINT_URL'),
+            'aws_access_key_id': os.getenv('WASABI_ACCESS_KEY'),
+            'aws_secret_access_key': os.getenv('WASABI_SECRET_KEY'),
+            'bucket_name': os.getenv('WASABI_BUCKET_NAME'),
+            'region_name': os.getenv('WASABI_REGION', 'us-east-1'),
+        },
+        'backblaze': {
+            'key_id': os.getenv('B2_KEY_ID'),
+            'application_key': os.getenv('B2_APPLICATION_KEY'),
+            'bucket_name': os.getenv('B2_BUCKET_NAME'),
+        },
+        'digitalocean': {
+            'endpoint_url': os.getenv('DO_SPACES_ENDPOINT'),
+            'aws_access_key_id': os.getenv('DO_SPACES_KEY'),
+            'aws_secret_access_key': os.getenv('DO_SPACES_SECRET'),
+            'bucket_name': os.getenv('DO_SPACES_BUCKET'),
+            'region_name': os.getenv('DO_SPACES_REGION', 'nyc3'),
+        },
+        'local': {
+            'base_path': worker_config.local_storage_path,
+            'url_prefix': 'http://localhost:8000/files',
+        }
+    }
+    
+    return configs.get(storage_type, {})
 
 def validate_config() -> List[str]:
-    """Валидация конфигурации worker'а"""
+    """
+    Валидация конфигурации worker'а
+    
+    Returns:
+        Список ошибок конфигурации
+    """
     errors = []
     
-    # Проверяем директории
-    if not worker_config.temp_dir.exists():
-        errors.append(f"Temp directory does not exist: {worker_config.temp_dir}")
-    
-    # Проверяем доступность FFmpeg
-    import shutil
-    if not shutil.which("ffmpeg"):
-        errors.append("FFmpeg not found in PATH")
-    
-    # Проверяем настройки Celery
-    if not settings.CELERY_BROKER_URL:
-        errors.append("CELERY_BROKER_URL not configured")
-    
-    # Проверяем storage настройки
-    if not settings.WASABI_ACCESS_KEY:
-        errors.append("Wasabi credentials not configured")
+    try:
+        # Проверяем директории
+        if not os.path.exists(worker_config.base_dir):
+            try:
+                Path(worker_config.base_dir).mkdir(parents=True, exist_ok=True)
+            except Exception:
+                errors.append(f"Cannot create base directory: {worker_config.base_dir}")
+        
+        if not os.path.exists(worker_config.download_temp_dir):
+            try:
+                Path(worker_config.download_temp_dir).mkdir(parents=True, exist_ok=True)
+            except Exception:
+                errors.append(f"Cannot create temp directory: {worker_config.download_temp_dir}")
+        
+        # Проверяем настройки производительности
+        if worker_config.worker_concurrency < 1:
+            errors.append("Worker concurrency must be at least 1")
+        
+        if worker_config.task_timeout <= worker_config.soft_timeout:
+            errors.append("Task timeout must be greater than soft timeout")
+        
+        if worker_config.max_file_size_mb < 1:
+            errors.append("Max file size must be at least 1 MB")
+        
+        # Проверяем доступность инструментов
+        try:
+            import subprocess
+            subprocess.run(['ffmpeg', '-version'], capture_output=True, check=True, timeout=5)
+        except Exception:
+            errors.append("FFmpeg not found or not working")
+        
+        try:
+            import subprocess
+            subprocess.run(['ffprobe', '-version'], capture_output=True, check=True, timeout=5)
+        except Exception:
+            errors.append("FFprobe not found or not working")
+        
+    except Exception as e:
+        errors.append(f"Unexpected error during validation: {e}")
     
     return errors
 
-def print_config_summary():
-    """Выводит сводку конфигурации"""
-    print("=" * 50)
-    print("VideoBot Pro Worker Configuration")
-    print("=" * 50)
-    print(f"Worker Name: {worker_config.worker_name}")
-    print(f"Concurrency: {worker_config.worker_concurrency}")
-    print(f"Pool Type: {worker_config.worker_pool}")
-    print(f"Task Timeout: {worker_config.task_timeout}s")
-    print(f"Temp Directory: {worker_config.temp_dir}")
-    print(f"Max File Size: {worker_config.max_file_size_mb}MB")
-    print(f"CDN Upload: {'Enabled' if worker_config.cdn_upload_enabled else 'Disabled'}")
-    print(f"Monitoring: {'Enabled' if worker_config.enable_monitoring else 'Disabled'}")
+def update_config(**kwargs):
+    """
+    Обновить конфигурацию worker'а
     
-    # Проверяем конфигурацию
-    errors = validate_config()
-    if errors:
-        print("\n⚠️  Configuration Errors:")
-        for error in errors:
-            print(f"  - {error}")
+    Args:
+        **kwargs: Параметры для обновления
+    """
+    global worker_config
+    
+    for key, value in kwargs.items():
+        if hasattr(worker_config, key):
+            setattr(worker_config, key, value)
+            logger.info(f"Updated worker config: {key} = {value}")
+        else:
+            logger.warning(f"Unknown config parameter: {key}")
+
+def get_config_summary() -> Dict[str, Any]:
+    """
+    Получить сводку конфигурации
+    
+    Returns:
+        Словарь с основными параметрами конфигурации
+    """
+    return {
+        'worker_name': worker_config.worker_name,
+        'concurrency': worker_config.worker_concurrency,
+        'pool': worker_config.worker_pool,
+        'task_timeout': worker_config.task_timeout,
+        'soft_timeout': worker_config.soft_timeout,
+        'max_file_size_mb': worker_config.max_file_size_mb,
+        'base_dir': worker_config.base_dir,
+        'temp_dir': worker_config.download_temp_dir,
+        'storage_path': worker_config.local_storage_path,
+    }
+
+def load_config_from_env():
+    """Загрузить конфигурацию из переменных окружения"""
+    env_mapping = {
+        'WORKER_NAME': 'worker_name',
+        'WORKER_CONCURRENCY': ('worker_concurrency', int),
+        'WORKER_POOL': 'worker_pool',
+        'TASK_TIMEOUT': ('task_timeout', int),
+        'SOFT_TIMEOUT': ('soft_timeout', int),
+        'MAX_FILE_SIZE_MB': ('max_file_size_mb', int),
+        'WORKER_BASE_DIR': 'base_dir',
+        'WORKER_TEMP_DIR': 'download_temp_dir',
+        'WORKER_STORAGE_PATH': 'local_storage_path',
+    }
+    
+    updates = {}
+    
+    for env_var, config_attr in env_mapping.items():
+        env_value = os.getenv(env_var)
+        if env_value:
+            try:
+                if isinstance(config_attr, tuple):
+                    attr_name, attr_type = config_attr
+                    updates[attr_name] = attr_type(env_value)
+                else:
+                    updates[config_attr] = env_value
+            except (ValueError, TypeError) as e:
+                logger.error(f"Invalid value for {env_var}: {env_value} ({e})")
+    
+    if updates:
+        update_config(**updates)
+        logger.info(f"Loaded {len(updates)} config values from environment")
+
+# Загружаем конфигурацию из окружения при импорте
+try:
+    load_config_from_env()
+except Exception as e:
+    logger.error(f"Error loading config from environment: {e}")
+
+# Валидируем конфигурацию при импорте
+try:
+    validation_errors = validate_config()
+    if validation_errors:
+        logger.warning("Configuration validation errors:", errors=validation_errors)
     else:
-        print("\n✅ Configuration is valid")
-    
-    print("=" * 50)
+        logger.info("Worker configuration validated successfully")
+except Exception as e:
+    logger.error(f"Error validating configuration: {e}")
+
+logger.info("Worker configuration loaded", **get_config_summary())

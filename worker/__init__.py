@@ -6,11 +6,23 @@ VideoBot Pro - Worker Package
 __version__ = "2.1.0"
 __description__ = "VideoBot Pro Worker - Asynchronous task processor"
 
-# Экспорт основных компонентов
-from .celery_app import celery_app, create_celery_app, validate_celery_config
-from .config import worker_config, WorkerConfig
+# Безопасный импорт основных компонентов
+try:
+    from .celery_app import celery_app, create_celery_app, validate_celery_config
+except ImportError as e:
+    print(f"Warning: Could not import celery_app components: {e}")
+    celery_app = None
+    create_celery_app = None
+    validate_celery_config = None
 
-# Lazy import задач чтобы избежать циклических импортов
+try:
+    from .config import worker_config, WorkerConfig
+except ImportError as e:
+    print(f"Warning: Could not import worker config: {e}")
+    worker_config = None
+    WorkerConfig = None
+
+# Ленивый импорт задач чтобы избежать циклических импортов
 def get_download_tasks():
     """Ленивый импорт задач скачивания"""
     try:
@@ -43,14 +55,14 @@ def get_cleanup_tasks():
     """Ленивый импорт cleanup задач"""
     try:
         from .tasks.cleanup_tasks import (
-            cleanup_expired_files,
-            cleanup_old_batches,
-            cleanup_analytics_data,
+            cleanup_old_files,
+            cleanup_temp_files,
+            health_check_task,
         )
         return {
-            'cleanup_expired_files': cleanup_expired_files,
-            'cleanup_old_batches': cleanup_old_batches,
-            'cleanup_analytics_data': cleanup_analytics_data,
+            'cleanup_old_files': cleanup_old_files,
+            'cleanup_temp_files': cleanup_temp_files,
+            'health_check_task': health_check_task,
         }
     except ImportError as e:
         print(f"Warning: Could not import cleanup tasks: {e}")
@@ -60,14 +72,12 @@ def get_analytics_tasks():
     """Ленивый импорт analytics задач"""
     try:
         from .tasks.analytics_tasks import (
-            update_daily_stats,
-            aggregate_user_stats,
-            generate_reports,
+            process_analytics_events,
+            calculate_daily_stats,
         )
         return {
-            'update_daily_stats': update_daily_stats,
-            'aggregate_user_stats': aggregate_user_stats,
-            'generate_reports': generate_reports,
+            'process_analytics_events': process_analytics_events,
+            'calculate_daily_stats': calculate_daily_stats,
         }
     except ImportError as e:
         print(f"Warning: Could not import analytics tasks: {e}")
@@ -77,14 +87,12 @@ def get_notification_tasks():
     """Ленивый импорт notification задач"""
     try:
         from .tasks.notification_tasks import (
-            send_download_notification,
-            send_batch_notification,
-            send_broadcast_message,
+            send_download_completion_notification,
+            send_batch_completion_notification,
         )
         return {
-            'send_download_notification': send_download_notification,
-            'send_batch_notification': send_batch_notification,
-            'send_broadcast_message': send_broadcast_message,
+            'send_download_completion_notification': send_download_completion_notification,
+            'send_batch_completion_notification': send_batch_completion_notification,
         }
     except ImportError as e:
         print(f"Warning: Could not import notification tasks: {e}")
@@ -169,6 +177,9 @@ def get_worker_info():
 def is_worker_available():
     """Проверить доступность worker'а"""
     try:
+        if not celery_app:
+            return False
+            
         # Простая проверка соединения с Celery
         inspect = celery_app.control.inspect()
         active_workers = inspect.active()
@@ -179,6 +190,9 @@ def is_worker_available():
 def get_worker_status():
     """Получить статус worker'а"""
     try:
+        if not celery_app:
+            return {'error': 'Celery app not available'}
+            
         inspect = celery_app.control.inspect()
         return {
             'active': inspect.active(),
@@ -194,7 +208,12 @@ def import_all_tasks():
     """Импортировать все задачи (для принудительной регистрации)"""
     try:
         # Импортируем все модули с задачами
-        from . import tasks as task_modules
+        get_download_tasks()
+        get_batch_tasks()
+        get_cleanup_tasks()
+        get_analytics_tasks()
+        get_notification_tasks()
+        
         print(f"✅ All worker tasks imported successfully")
         return True
     except Exception as e:
