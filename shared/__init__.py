@@ -215,14 +215,17 @@ from .services import (
     
     # Redis
     RedisService,
-    init_redis,
-    close_redis,
     
     # Аутентификация
     AuthService,
     
     # Аналитика
     AnalyticsService,
+)
+
+from .config.redis import (
+    init_redis,
+    close_redis,
 )
 
 # Константы и конфигурация
