@@ -70,42 +70,76 @@ class AnalyticsService:
             start_date = self._get_start_date(time_range)
             
             async with get_async_session() as session:
-                # Базовые метрики пользователей
+                # Базовые метрики пользователей, создание правильных отдельных запросов
                 if user_id:
-                    user_filter = "AND u.telegram_id = :user_id"
                     params = {'start_date': start_date, 'user_id': user_id}
+                    query_user_metrics = text(
+                        """
+                        SELECT 
+                            COUNT(DISTINCT u.id) as total_users,
+                            COUNT(DISTINCT CASE WHEN u.created_at >= :start_date THEN u.id END) as new_users,
+                            COUNT(DISTINCT CASE WHEN u.last_active_at >= :start_date THEN u.id END) as active_users,
+                            COUNT(DISTINCT CASE WHEN u.is_premium = true THEN u.id END) as premium_users,
+                            COUNT(DISTINCT CASE WHEN u.user_type = 'trial' THEN u.id END) as trial_users,
+                            AVG(CASE WHEN u.downloads_total > 0 THEN u.downloads_total END) as avg_downloads
+                        FROM users u 
+                        WHERE u.is_deleted = false AND u.telegram_id = :user_id
+                        """
+                    )
+
+                    query_user_type_stats = text(
+                        """
+                        SELECT
+                            u.user_type,
+                            COUNT(*) as count,
+                            AVG(u.downloads_total) as avg_downloads,
+                            SUM(u.downloads_today) as downloads_today
+                        FROM users u 
+                        WHERE u.is_deleted = false 
+                        AND u.created_at >= :start_date AND u.telegram_id = :user_id
+                        GROUP BY u.user_type
+                        ORDER BY count DESC
+                        """
+                    )
+
                 else:
-                    user_filter = ""
                     params = {'start_date': start_date}
-                
+                    query_user_metrics = text(
+                        """
+                        SELECT 
+                            COUNT(DISTINCT u.id) as total_users,
+                            COUNT(DISTINCT CASE WHEN u.created_at >= :start_date THEN u.id END) as new_users,
+                            COUNT(DISTINCT CASE WHEN u.last_active_at >= :start_date THEN u.id END) as active_users,
+                            COUNT(DISTINCT CASE WHEN u.is_premium = true THEN u.id END) as premium_users,
+                            COUNT(DISTINCT CASE WHEN u.user_type = 'trial' THEN u.id END) as trial_users,
+                            AVG(CASE WHEN u.downloads_total > 0 THEN u.downloads_total END) as avg_downloads
+                        FROM users u 
+                        WHERE u.is_deleted = false
+                        """
+                    )
+
+                    query_user_type_stats = text(
+                        """
+                        SELECT
+                            u.user_type,
+                            COUNT(*) as count,
+                            AVG(u.downloads_total) as avg_downloads,
+                            SUM(u.downloads_today) as downloads_today
+                        FROM users u 
+                        WHERE u.is_deleted = false 
+                        AND u.created_at >= :start_date
+                        GROUP BY u.user_type
+                        ORDER BY count DESC
+                        """
+                    )
+
                 # Общие метрики
-                user_metrics = await session.execute(f"""
-                    SELECT 
-                        COUNT(DISTINCT u.id) as total_users,
-                        COUNT(DISTINCT CASE WHEN u.created_at >= :start_date THEN u.id END) as new_users,
-                        COUNT(DISTINCT CASE WHEN u.last_active_at >= :start_date THEN u.id END) as active_users,
-                        COUNT(DISTINCT CASE WHEN u.is_premium = true THEN u.id END) as premium_users,
-                        COUNT(DISTINCT CASE WHEN u.user_type = 'trial' THEN u.id END) as trial_users,
-                        AVG(CASE WHEN u.downloads_total > 0 THEN u.downloads_total END) as avg_downloads
-                    FROM users u 
-                    WHERE u.is_deleted = false {user_filter}
-                """, params)
+                user_metrics = await session.execute(query_user_metrics, params)
                 
                 user_stats = user_metrics.fetchone()
                 
                 # Метрики по типам пользователей
-                user_type_stats = await session.execute(f"""
-                    SELECT 
-                        u.user_type,
-                        COUNT(*) as count,
-                        AVG(u.downloads_total) as avg_downloads,
-                        SUM(u.downloads_today) as downloads_today
-                    FROM users u 
-                    WHERE u.is_deleted = false 
-                    AND u.created_at >= :start_date {user_filter}
-                    GROUP BY u.user_type
-                    ORDER BY count DESC
-                """, params)
+                user_type_stats = await session.execute(query_user_type_stats, params)
                 
                 type_distribution = {
                     row.user_type: {

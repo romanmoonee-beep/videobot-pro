@@ -13,6 +13,8 @@ from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import StatesGroup, State
 from aiogram.filters import Command
 
+from sqlalchemy import text
+
 from shared.config.database import get_async_session, DatabaseHealthCheck
 from shared.models import User, DownloadBatch, Payment, RequiredChannel, BroadcastMessage, EventType
 from shared.models.analytics import track_user_event
@@ -44,18 +46,18 @@ async def admin_panel(message: Message):
         # Получаем базовую статистику
         async with get_async_session() as session:
             # Общие метрики
-            total_users = await session.execute("SELECT COUNT(*) FROM users WHERE is_deleted = false")
+            total_users = await session.execute(text("SELECT COUNT(*) FROM users WHERE is_deleted = false"))
             active_users = await session.execute(
-                "SELECT COUNT(*) FROM users WHERE last_active_at > NOW() - INTERVAL '24 hours'"
+                text("SELECT COUNT(*) FROM users WHERE last_active_at > NOW() - INTERVAL '24 hours'")
             )
-            premium_users = await session.execute("SELECT COUNT(*) FROM users WHERE is_premium = true")
+            premium_users = await session.execute(text("SELECT COUNT(*) FROM users WHERE is_premium = true"))
             
             # Сегодняшние метрики
             downloads_today = await session.execute(
-                "SELECT COUNT(*) FROM download_tasks WHERE DATE(created_at) = CURRENT_DATE"
+                text("SELECT COUNT(*) FROM download_tasks WHERE DATE(created_at) = CURRENT_DATE")
             )
             revenue_today = await session.execute(
-                "SELECT COALESCE(SUM(amount), 0) FROM payments WHERE DATE(completed_at) = CURRENT_DATE AND status = 'completed'"
+                text("SELECT COALESCE(SUM(amount), 0) FROM payments WHERE DATE(completed_at) = CURRENT_DATE AND status = 'completed'")
             )
         
         admin_text = [
@@ -122,47 +124,47 @@ async def show_detailed_stats(message: Message, edit: bool = False):
     try:
         async with get_async_session() as session:
             # Пользователи
-            total_users = await session.execute("SELECT COUNT(*) FROM users WHERE is_deleted = false")
+            total_users = await session.execute(text("SELECT COUNT(*) FROM users WHERE is_deleted = false"))
             active_24h = await session.execute(
-                "SELECT COUNT(*) FROM users WHERE last_active_at > NOW() - INTERVAL '24 hours'"
+                text("SELECT COUNT(*) FROM users WHERE last_active_at > NOW() - INTERVAL '24 hours'")
             )
             active_7d = await session.execute(
-                "SELECT COUNT(*) FROM users WHERE last_active_at > NOW() - INTERVAL '7 days'"
+                text("SELECT COUNT(*) FROM users WHERE last_active_at > NOW() - INTERVAL '7 days'")
             )
             new_today = await session.execute(
-                "SELECT COUNT(*) FROM users WHERE DATE(created_at) = CURRENT_DATE"
+                text("SELECT COUNT(*) FROM users WHERE DATE(created_at) = CURRENT_DATE")
             )
             
             # Premium и Trial
             premium_active = await session.execute(
-                "SELECT COUNT(*) FROM users WHERE is_premium = true AND premium_expires_at > NOW()"
+                text("SELECT COUNT(*) FROM users WHERE is_premium = true AND premium_expires_at > NOW()")
             )
             trial_active = await session.execute(
-                "SELECT COUNT(*) FROM users WHERE user_type = 'trial' AND trial_expires_at > NOW()"
+                text("SELECT COUNT(*) FROM users WHERE user_type = 'trial' AND trial_expires_at > NOW()")
             )
             
             # Скачивания
             downloads_today = await session.execute(
-                "SELECT COUNT(*) FROM download_tasks WHERE DATE(created_at) = CURRENT_DATE"
+                text("SELECT COUNT(*) FROM download_tasks WHERE DATE(created_at) = CURRENT_DATE")
             )
             downloads_week = await session.execute(
-                "SELECT COUNT(*) FROM download_tasks WHERE created_at > NOW() - INTERVAL '7 days'"
+                text("SELECT COUNT(*) FROM download_tasks WHERE created_at > NOW() - INTERVAL '7 days'")
             )
             success_rate = await session.execute(
-                """SELECT ROUND(
+                text("""SELECT ROUND(
                     COUNT(CASE WHEN status = 'completed' THEN 1 END) * 100.0 / COUNT(*), 2
-                ) FROM download_tasks WHERE created_at > NOW() - INTERVAL '24 hours'"""
+                ) FROM download_tasks WHERE created_at > NOW() - INTERVAL '24 hours'""")
             )
             
             # Платежи
             revenue_today = await session.execute(
-                "SELECT COALESCE(SUM(amount), 0) FROM payments WHERE DATE(completed_at) = CURRENT_DATE AND status = 'completed'"
+                text("SELECT COALESCE(SUM(amount), 0) FROM payments WHERE DATE(completed_at) = CURRENT_DATE AND status = 'completed'")
             )
             revenue_week = await session.execute(
-                "SELECT COALESCE(SUM(amount), 0) FROM payments WHERE completed_at > NOW() - INTERVAL '7 days' AND status = 'completed'"
+                text("SELECT COALESCE(SUM(amount), 0) FROM payments WHERE completed_at > NOW() - INTERVAL '7 days' AND status = 'completed'")
             )
             payments_today = await session.execute(
-                "SELECT COUNT(*) FROM payments WHERE DATE(created_at) = CURRENT_DATE"
+                text("SELECT COUNT(*) FROM payments WHERE DATE(created_at) = CURRENT_DATE")
             )
             
             # Система
@@ -294,12 +296,12 @@ async def show_user_details(message: Message, user: User):
     """Показать детали пользователя"""
     # Получаем дополнительную статистику
     async with get_async_session() as session:
-        downloads_count = await session.execute(
-            "SELECT COUNT(*) FROM download_tasks WHERE user_id = :user_id",
+        downloads_count = (await session.execute)(
+            text("SELECT COUNT(*) FROM download_tasks WHERE user_id = :user_id"),
             {"user_id": user.id}
         )
         payments_sum = await session.execute(
-            "SELECT COALESCE(SUM(amount), 0) FROM payments WHERE user_id = :user_id AND status = 'completed'",
+            text("SELECT COALESCE(SUM(amount), 0) FROM payments WHERE user_id = :user_id AND status = 'completed'"),
             {"user_id": user.id}
         )
     

@@ -1,464 +1,737 @@
 """
-VideoBot Pro - Download Tasks
-Celery задачи для обработки отдельных загрузок видео
+VideoBot Pro - Updated Worker Tasks with CDN Integration
+Обновленные задачи Worker'а с интеграцией CDN
 """
 
-import time
 import asyncio
 import structlog
-from datetime import datetime, timedelta
-from typing import Dict, Any, Optional
-from celery import current_task
-from celery.exceptions import Retry, WorkerLostError
+from datetime import datetime
+from typing import Dict, Any, List, Optional
+from celery import Task
 
-from worker.celery_app import celery_app
+from shared.models.download_task import DownloadTask
+from shared.models.user import User
 from shared.config.database import get_async_session
+from worker.celery_app import celery_app
+from worker.downloaders.factory import DownloaderFactory
+from worker.processors.video_processor import VideoProcessor
+from worker.processors.thumbnail_generator import ThumbnailGenerator
+from worker.storage.local import local_storage
+from worker.integrations.cdn_upload import upload_to_cdn, upload_thumbnail_to_cdn, is_cdn_available
 
 logger = structlog.get_logger(__name__)
 
-@celery_app.task(
-    bind=True,
-    autoretry_for=(Exception,),
-    retry_kwargs={'max_retries': 3, 'countdown': 60},
-    retry_backoff=True,
-    time_limit=1800,  # 30 minutes
-    soft_time_limit=1500,  # 25 minutes
-    acks_late=True,
-    reject_on_worker_lost=True
-)
-def process_single_download(self, task_id: int) -> Dict[str, Any]:
+class BaseWorkerTask(Task):
+    """Базовый класс для всех задач Worker'а"""
+    
+    def on_failure(self, exc, task_id, args, kwargs, einfo):
+        """Обработка ошибок задач"""
+        logger.error(
+            "Task failed",
+            task_id=task_id,
+            exception=str(exc),
+            args=args,
+            kwargs=kwargs
+        )
+
+@celery_app.task(bind=True, base=BaseWorkerTask, name='download_video')
+async def download_video_task(
+    self,
+    task_id: int,
+    user_id: int,
+    url: str,
+    quality: str = "best",
+    extract_audio: bool = False,
+    generate_thumbnail: bool = True
+) -> Dict[str, Any]:
     """
-    Обработать отдельную задачу скачивания
+    Основная задача загрузки видео с интеграцией CDN
     
     Args:
         task_id: ID задачи в базе данных
+        user_id: ID пользователя
+        url: URL видео
+        quality: Качество видео
+        extract_audio: Извлекать ли аудио
+        generate_thumbnail: Генерировать ли превью
         
     Returns:
-        Результат обработки
+        Результат выполнения задачи
     """
-    logger.info(f"Starting download task", task_id=task_id, celery_task_id=self.request.id)
-    
-    start_time = time.time()
-    
-    try:
-        # Запускаем асинхронную обработку
-        loop = asyncio.new_event_loop()
-        asyncio.set_event_loop(loop)
-        try:
-            result = loop.run_until_complete(_process_download_async(task_id, self.request))
-            return result
-        finally:
-            loop.close()
-        
-    except Exception as e:
-        logger.error(f"Download task failed", task_id=task_id, error=str(e), exc_info=True)
-        
-        # Повторяем если возможно
-        if self.request.retries < self.max_retries:
-            logger.info(f"Retrying download task", task_id=task_id, retry=self.request.retries + 1)
-            raise self.retry(countdown=60 * (2 ** self.request.retries))
-        
-        return {
-            "success": False,
-            "task_id": task_id,
-            "error": str(e),
-            "error_type": type(e).__name__,
-            "processing_time": int(time.time() - start_time)
-        }
-
-async def _process_download_async(task_id: int, request_info) -> Dict[str, Any]:
-    """Асинхронная обработка загрузки"""
-    start_time = time.time()
+    result = {
+        'task_id': task_id,
+        'success': False,
+        'files': [],
+        'cdn_urls': [],
+        'errors': []
+    }
     
     try:
+        logger.info(f"Starting video download task", task_id=task_id, url=url)
+        
+        # Получаем задачу и пользователя из базы данных
         async with get_async_session() as session:
-            # Получаем задачу из БД
-            result = await session.execute(
-                "SELECT * FROM download_tasks WHERE id = :task_id",
-                {"task_id": task_id}
+            task = await session.get(DownloadTask, task_id)
+            user = await session.get(User, user_id)
+            
+            if not task or not user:
+                raise ValueError("Task or user not found")
+        
+        # Обновляем статус задачи
+        await _update_task_status(task_id, 'downloading', 'Starting download...')
+        
+        # 1. ЭТАП: Определяем платформу и создаем загрузчик
+        downloader = DownloaderFactory.create_downloader(url)
+        if not downloader:
+            raise ValueError(f"Unsupported platform for URL: {url}")
+        
+        # 2. ЭТАП: Получаем информацию о видео
+        await _update_task_status(task_id, 'downloading', 'Getting video info...')
+        video_info = await downloader.get_video_info(url)
+        
+        if not video_info:
+            raise ValueError("Failed to get video information")
+        
+        # 3. ЭТАП: Загружаем видео
+        await _update_task_status(task_id, 'downloading', 'Downloading video file...')
+        download_result = await downloader.download(
+            url=url,
+            quality=quality,
+            output_path=local_storage.downloads_dir
+        )
+        
+        if not download_result.get('success'):
+            raise ValueError(f"Download failed: {download_result.get('error')}")
+        
+        downloaded_files = []
+        video_file_path = download_result['file_path']
+        
+        # Основной видеофайл
+        downloaded_files.append({
+            'path': video_file_path,
+            'type': 'video',
+            'metadata': {
+                'title': video_info.get('title'),
+                'duration': video_info.get('duration'),
+                'format': video_info.get('format'),
+                'quality': quality
+            }
+        })
+        
+        # 4. ЭТАП: Обработка видео (если нужно)
+        if user.user_type in ['premium', 'admin'] and quality != 'best':
+            await _update_task_status(task_id, 'processing', 'Processing video...')
+            processor = VideoProcessor()
+            
+            processed_file = await processor.process_video(
+                input_path=video_file_path,
+                quality=quality,
+                user_type=user.user_type
             )
-            task_row = result.fetchone()
             
-            if not task_row:
-                raise ValueError(f"Download task {task_id} not found")
+            if processed_file:
+                downloaded_files.append({
+                    'path': processed_file,
+                    'type': 'video_processed',
+                    'metadata': {
+                        'processed_quality': quality,
+                        'original_file': video_file_path
+                    }
+                })
+        
+        # 5. ЭТАП: Извлечение аудио (если нужно)
+        if extract_audio:
+            await _update_task_status(task_id, 'processing', 'Extracting audio...')
+            processor = VideoProcessor()
             
-            # Получаем пользователя
-            user_result = await session.execute(
-                "SELECT * FROM users WHERE id = :user_id",
-                {"user_id": task_row.user_id}
+            audio_file = await processor.extract_audio(
+                video_path=video_file_path,
+                output_format='mp3'
             )
-            user_row = user_result.fetchone()
             
-            if not user_row:
-                raise ValueError(f"User {task_row.user_id} not found")
+            if audio_file:
+                downloaded_files.append({
+                    'path': audio_file,
+                    'type': 'audio',
+                    'metadata': {
+                        'format': 'mp3',
+                        'extracted_from': video_file_path
+                    }
+                })
+        
+        # 6. ЭТАП: Генерация превью (если нужно)
+        thumbnail_cdn_url = None
+        if generate_thumbnail:
+            await _update_task_status(task_id, 'processing', 'Generating thumbnail...')
+            thumbnail_generator = ThumbnailGenerator()
             
-            # Проверяем можно ли обрабатывать задачу
-            if task_row.status != 'pending':
-                logger.warning(f"Task {task_id} is not pending", status=task_row.status)
-                return {"success": False, "error": "Task is not pending"}
+            thumbnail_path = await thumbnail_generator.generate_thumbnail(
+                video_path=video_file_path,
+                timestamp=30  # Превью на 30-й секунде
+            )
             
-            # Отмечаем как обрабатывающуюся
-            await session.execute("""
-                UPDATE download_tasks 
-                SET status = 'processing',
-                    started_at = :started_at,
-                    worker_id = :worker_id,
-                    celery_task_id = :celery_task_id
-                WHERE id = :task_id
-            """, {
-                "started_at": datetime.utcnow(),
-                "worker_id": request_info.hostname,
-                "celery_task_id": request_info.id,
-                "task_id": task_id
-            })
-            await session.commit()
+            if thumbnail_path:
+                # Загружаем превью в CDN отдельно
+                if await is_cdn_available():
+                    thumbnail_result = await upload_thumbnail_to_cdn(
+                        thumbnail_path, task, user
+                    )
+                    
+                    if thumbnail_result.get('success'):
+                        thumbnail_cdn_url = thumbnail_result.get('cdn_url')
+                
+                downloaded_files.append({
+                    'path': thumbnail_path,
+                    'type': 'thumbnail',
+                    'metadata': {
+                        'timestamp': 30,
+                        'format': 'jpg'
+                    }
+                })
         
-        # Имитация обработки файла (замените на реальную логику)
-        await asyncio.sleep(2)  # Симуляция скачивания
+        # 7. ЭТАП: Загрузка в CDN
+        cdn_result = None
+        if await is_cdn_available():
+            await _update_task_status(task_id, 'uploading', 'Uploading to cloud storage...')
+            
+            cdn_result = await upload_to_cdn(task, user, downloaded_files)
+            
+            if cdn_result.get('success'):
+                result['cdn_urls'] = [cdn_result.get('cdn_url')]
+                result['direct_urls'] = [cdn_result.get('direct_url')]
+                result['storage_type'] = cdn_result.get('storage_type')
+                
+                logger.info(
+                    "Files uploaded to CDN",
+                    task_id=task_id,
+                    storage_type=cdn_result.get('storage_type'),
+                    cdn_url=cdn_result.get('cdn_url')
+                )
+            else:
+                logger.warning(f"CDN upload failed: {cdn_result.get('error')}")
+                result['errors'].append(f"CDN upload failed: {cdn_result.get('error')}")
+        else:
+            logger.warning("CDN not available, files stored locally only")
+            result['errors'].append("CDN not available")
         
-        # Обновляем как завершенную
-        async with get_async_session() as session:
-            await session.execute("""
-                UPDATE download_tasks 
-                SET status = 'completed',
-                    completed_at = :completed_at,
-                    file_name = :file_name,
-                    file_size_bytes = :file_size,
-                    progress_percent = 100
-                WHERE id = :task_id
-            """, {
-                "completed_at": datetime.utcnow(),
-                "file_name": f"video_{task_id}.mp4",
-                "file_size": 1024 * 1024 * 10,  # 10MB
-                "task_id": task_id
-            })
-            await session.commit()
+        # 8. ЭТАП: Обновление базы данных
+        await _update_task_completion(
+            task_id=task_id,
+            cdn_url=cdn_result.get('cdn_url') if cdn_result else None,
+            direct_url=cdn_result.get('direct_url') if cdn_result else None,
+            thumbnail_url=thumbnail_cdn_url,
+            file_size=download_result.get('file_size', 0),
+            video_info=video_info
+        )
         
-        result = {
-            "success": True,
-            "task_id": task_id,
-            "file_info": {
-                "name": f"video_{task_id}.mp4",
-                "size_mb": 10,
-                "format": "mp4",
-                "quality": "720p"
-            },
-            "processing_time": int(time.time() - start_time)
-        }
+        # 9. ЭТАП: Очистка локальных файлов (если загружено в CDN)
+        if cdn_result and cdn_result.get('success'):
+            await _cleanup_local_files([f['path'] for f in downloaded_files])
         
-        logger.info(f"Download task completed successfully", 
-                   task_id=task_id, processing_time=result["processing_time"])
+        result['success'] = True
+        result['files'] = downloaded_files
+        result['video_info'] = video_info
+        
+        logger.info(f"Video download task completed successfully", task_id=task_id)
         
         return result
         
     except Exception as e:
-        logger.error(f"Error in download processing: {e}")
+        logger.error(f"Video download task failed", task_id=task_id, error=str(e))
         
-        # Обновляем задачу как неудачную
-        try:
-            async with get_async_session() as session:
-                await session.execute("""
-                    UPDATE download_tasks 
-                    SET status = 'failed',
-                        completed_at = :completed_at,
-                        error_message = :error_message
-                    WHERE id = :task_id
-                """, {
-                    "completed_at": datetime.utcnow(),
-                    "error_message": str(e),
-                    "task_id": task_id
-                })
-                await session.commit()
-        except Exception as db_error:
-            logger.error(f"Failed to update task status", error=str(db_error))
+        # Обновляем статус задачи как неудачной
+        await _update_task_status(task_id, 'failed', f'Error: {str(e)}')
         
-        raise
+        result['errors'].append(str(e))
+        return result
 
-@celery_app.task(bind=True)
-def retry_failed_download(self, task_id: int) -> Dict[str, Any]:
+@celery_app.task(bind=True, base=BaseWorkerTask, name='download_batch')
+async def download_batch_task(
+    self,
+    batch_id: int,
+    user_id: int,
+    urls: List[str],
+    quality: str = "best",
+    create_archive: bool = True
+) -> Dict[str, Any]:
     """
-    Повторить неудачную загрузку
+    Задача пакетной загрузки видео
     
     Args:
-        task_id: ID задачи для повтора
+        batch_id: ID пакета в базе данных
+        user_id: ID пользователя
+        urls: Список URL для загрузки
+        quality: Качество видео
+        create_archive: Создавать ли архив
         
     Returns:
-        Результат операции
+        Результат выполнения пакетной загрузки
     """
-    logger.info(f"Retrying failed download", task_id=task_id)
+    result = {
+        'batch_id': batch_id,
+        'success': False,
+        'completed_downloads': 0,
+        'failed_downloads': 0,
+        'files': [],
+        'archive_url': None,
+        'errors': []
+    }
     
     try:
-        loop = asyncio.new_event_loop()
-        asyncio.set_event_loop(loop)
-        try:
-            result = loop.run_until_complete(_retry_download_async(task_id))
-            return result
-        finally:
-            loop.close()
+        logger.info(f"Starting batch download", batch_id=batch_id, urls_count=len(urls))
         
-    except Exception as e:
-        logger.error(f"Failed to retry download", task_id=task_id, error=str(e))
-        return {"success": False, "error": str(e)}
-
-async def _retry_download_async(task_id: int) -> Dict[str, Any]:
-    """Асинхронный повтор загрузки"""
-    try:
+        # Получаем пользователя
         async with get_async_session() as session:
-            result = await session.execute(
-                "SELECT * FROM download_tasks WHERE id = :task_id",
-                {"task_id": task_id}
-            )
-            task_row = result.fetchone()
-            
-            if not task_row:
-                return {"success": False, "error": "Task not found"}
-            
-            if task_row.status not in ['failed', 'cancelled']:
-                return {"success": False, "error": "Task cannot be retried"}
-            
-            # Подготавливаем к повтору
-            await session.execute("""
-                UPDATE download_tasks 
-                SET status = 'pending',
-                    started_at = NULL,
-                    completed_at = NULL,
-                    error_message = NULL,
-                    retry_count = COALESCE(retry_count, 0) + 1
-                WHERE id = :task_id
-            """, {"task_id": task_id})
-            await session.commit()
+            user = await session.get(User, user_id)
+            if not user:
+                raise ValueError("User not found")
         
-        # Запускаем новую задачу
-        process_single_download.delay(task_id)
+        # Обновляем статус пакета
+        await _update_batch_status(batch_id, 'downloading', 'Starting batch download...')
         
-        return {"success": True, "task_id": task_id, "message": "Retry initiated"}
+        all_downloaded_files = []
+        
+        # Загружаем каждое видео
+        for i, url in enumerate(urls):
+            try:
+                await _update_batch_status(
+                    batch_id, 'downloading', 
+                    f'Downloading {i+1}/{len(urls)}: {url[:50]}...'
+                )
+                
+                # Создаем временную задачу для загрузки
+                temp_task = DownloadTask(
+                    id=f"batch_{batch_id}_{i}",
+                    url=url,
+                    user_id=user_id,
+                    platform=_detect_platform(url)
+                )
+                
+                # Загружаем видео
+                download_result = await download_video_task.apply_async(
+                    args=[temp_task.id, user_id, url, quality, False, True],
+                    countdown=0
+                ).get()
+                
+                if download_result.get('success'):
+                    all_downloaded_files.extend(download_result.get('files', []))
+                    result['completed_downloads'] += 1
+                else:
+                    result['failed_downloads'] += 1
+                    result['errors'].extend(download_result.get('errors', []))
+                    
+            except Exception as e:
+                logger.error(f"Failed to download {url}: {e}")
+                result['failed_downloads'] += 1
+                result['errors'].append(f"URL {url}: {str(e)}")
+        
+        # Если есть загруженные файлы и нужно создать архив
+        if all_downloaded_files and create_archive:
+            await _update_batch_status(batch_id, 'processing', 'Creating archive...')
+            
+            try:
+                from worker.integrations.cdn_upload import cdn_integration
+                
+                # Создаем архив и загружаем в CDN
+                file_paths = [f['path'] for f in all_downloaded_files if f.get('type') == 'video']
+                archive_name = f"batch_{batch_id}_{int(datetime.utcnow().timestamp())}"
+                
+                archive_result = await cdn_integration.cdn_client.create_archive_and_upload(
+                    files=file_paths,
+                    archive_name=archive_name,
+                    task=temp_task,  # Используем последнюю временную задачу
+                    user=user
+                )
+                
+                if archive_result.get('success'):
+                    result['archive_url'] = archive_result.get('cdn_url')
+                    logger.info(f"Batch archive created", batch_id=batch_id, archive_url=result['archive_url'])
+                else:
+                    result['errors'].append(f"Archive creation failed: {archive_result.get('error')}")
+                    
+            except Exception as e:
+                logger.error(f"Archive creation failed: {e}")
+                result['errors'].append(f"Archive creation failed: {str(e)}")
+        
+        # Обновляем результат
+        result['success'] = result['completed_downloads'] > 0
+        result['files'] = all_downloaded_files
+        
+        # Обновляем статус пакета в базе данных
+        final_status = 'completed' if result['success'] else 'failed'
+        status_message = f"Completed: {result['completed_downloads']}, Failed: {result['failed_downloads']}"
+        
+        await _update_batch_status(batch_id, final_status, status_message)
+        await _update_batch_completion(
+            batch_id=batch_id,
+            archive_url=result.get('archive_url'),
+            completed_count=result['completed_downloads'],
+            failed_count=result['failed_downloads']
+        )
+        
+        # Очистка локальных файлов
+        if result.get('archive_url'):
+            await _cleanup_local_files([f['path'] for f in all_downloaded_files])
+        
+        logger.info(f"Batch download completed", batch_id=batch_id, **result)
+        
+        return result
         
     except Exception as e:
-        logger.error(f"Error in retry download: {e}")
-        return {"success": False, "error": str(e)}
+        logger.error(f"Batch download task failed", batch_id=batch_id, error=str(e))
+        
+        await _update_batch_status(batch_id, 'failed', f'Error: {str(e)}')
+        
+        result['errors'].append(str(e))
+        return result
 
-@celery_app.task
-def cleanup_expired_downloads() -> Dict[str, Any]:
+@celery_app.task(bind=True, base=BaseWorkerTask, name='cleanup_old_files')
+async def cleanup_old_files_task(self, max_age_hours: int = 24) -> Dict[str, Any]:
     """
-    Очистка истекших загрузок
+    Задача очистки старых файлов
     
+    Args:
+        max_age_hours: Максимальный возраст файлов в часах
+        
     Returns:
-        Статистика очистки
+        Результат очистки
     """
-    logger.info("Starting cleanup of expired downloads")
+    result = {
+        'success': False,
+        'local_cleanup': {},
+        'cdn_cleanup': {},
+        'total_freed_space_gb': 0.0,
+        'errors': []
+    }
     
     try:
-        loop = asyncio.new_event_loop()
-        asyncio.set_event_loop(loop)
+        logger.info(f"Starting cleanup task", max_age_hours=max_age_hours)
+        
+        # 1. Очистка локальных файлов
         try:
-            result = loop.run_until_complete(_cleanup_expired_async())
-            return result
-        finally:
-            loop.close()
+            local_result = {
+                'downloads': local_storage.cleanup_old_files('downloads', max_age_hours),
+                'thumbnails': local_storage.cleanup_old_files('thumbnails', max_age_hours),
+                'temp': local_storage.cleanup_temp_files(max_age_hours)
+            }
+            
+            result['local_cleanup'] = local_result
+            logger.info(f"Local cleanup completed", **local_result)
+            
+        except Exception as e:
+            logger.error(f"Local cleanup failed: {e}")
+            result['errors'].append(f"Local cleanup: {str(e)}")
+        
+        # 2. Очистка CDN (если доступен)
+        if await is_cdn_available():
+            try:
+                from worker.integrations.cdn_upload import cdn_integration
+                
+                cdn_stats = await cdn_integration.get_cdn_stats()
+                
+                if 'error' not in cdn_stats:
+                    # Запрашиваем очистку через CDN API
+                    import aiohttp
+                    
+                    async with aiohttp.ClientSession() as session:
+                        cleanup_url = f"{cdn_integration.cdn_client.cdn_base_url}/api/v1/admin/storage/cleanup"
+                        headers = {
+                            'Authorization': f'Bearer {await cdn_integration.cdn_client._get_system_auth_token()}'
+                        }
+                        
+                        async with session.post(cleanup_url, headers=headers) as response:
+                            if response.status == 200:
+                                cdn_cleanup_result = await response.json()
+                                result['cdn_cleanup'] = cdn_cleanup_result.get('cleanup_result', {})
+                            else:
+                                result['errors'].append(f"CDN cleanup request failed: {response.status}")
+                
+            except Exception as e:
+                logger.error(f"CDN cleanup failed: {e}")
+                result['errors'].append(f"CDN cleanup: {str(e)}")
+        
+        # Подсчитываем общее освобожденное место
+        total_freed = 0.0
+        if result['local_cleanup']:
+            # Примерный расчет на основе количества файлов
+            total_files = sum(result['local_cleanup'].values())
+            total_freed += total_files * 0.1  # Примерно 100MB на файл
+        
+        if result['cdn_cleanup']:
+            total_freed += result['cdn_cleanup'].get('total_freed_gb', 0.0)
+        
+        result['total_freed_space_gb'] = round(total_freed, 2)
+        result['success'] = len(result['errors']) == 0
+        
+        logger.info(f"Cleanup task completed", **result)
+        
+        return result
         
     except Exception as e:
-        logger.error(f"Failed to cleanup expired downloads", error=str(e))
-        return {"success": False, "error": str(e)}
+        logger.error(f"Cleanup task failed: {e}")
+        result['errors'].append(str(e))
+        return result
 
-async def _cleanup_expired_async() -> Dict[str, Any]:
-    """Асинхронная очистка истекших загрузок"""
-    try:
-        cleaned_count = 0
+@celery_app.task(bind=True, base=BaseWorkerTask, name='migrate_files_to_cdn')
+async def migrate_files_to_cdn_task(self, limit: int = 100) -> Dict[str, Any]:
+    """
+    Задача миграции локальных файлов в CDN
+    
+    Args:
+        limit: Максимальное количество файлов для миграции за раз
         
-        async with get_async_session() as session:
-            # Находим истекшие задачи
-            result = await session.execute("""
-                SELECT id, local_file_path 
-                FROM download_tasks 
-                WHERE expires_at < NOW() 
-                AND status = 'completed'
-                AND local_file_path IS NOT NULL
-                LIMIT 1000
-            """)
-            
-            expired_tasks = result.fetchall()
-            
-            for task in expired_tasks:
-                try:
-                    # Удаляем локальный файл
-                    if task.local_file_path:
+    Returns:
+        Результат миграции
+    """
+    result = {
+        'success': False,
+        'migrated_files': 0,
+        'failed_files': 0,
+        'total_size_gb': 0.0,
+        'errors': []
+    }
+    
+    try:
+        logger.info(f"Starting file migration to CDN", limit=limit)
+        
+        if not await is_cdn_available():
+            raise ValueError("CDN is not available")
+        
+        # Получаем список локальных файлов
+        local_files = []
+        
+        for category in ['downloads', 'thumbnails']:
+            try:
+                category_dir = local_storage._get_category_dir(category)
+                
+                for file_path in category_dir.rglob("*"):
+                    if file_path.is_file() and len(local_files) < limit:
+                        local_files.append({
+                            'path': str(file_path),
+                            'category': category,
+                            'size': file_path.stat().st_size
+                        })
+            except Exception as e:
+                logger.warning(f"Error scanning {category} directory: {e}")
+        
+        if not local_files:
+            result['success'] = True
+            logger.info("No local files found for migration")
+            return result
+        
+        # Мигрируем файлы
+        from worker.integrations.cdn_upload import cdn_integration
+        
+        for file_info in local_files:
+            try:
+                # Создаем фиктивную задачу для миграции
+                migration_task = DownloadTask(
+                    id=f"migration_{int(datetime.utcnow().timestamp())}",
+                    url="local_migration",
+                    user_id=1,  # Системный пользователь
+                    platform="migration"
+                )
+                
+                # Создаем фиктивного пользователя
+                migration_user = User(
+                    id=1,
+                    username="system",
+                    user_type="admin"
+                )
+                
+                # Загружаем файл в CDN
+                upload_result = await cdn_integration.cdn_client.upload_file(
+                    file_path=file_info['path'],
+                    task=migration_task,
+                    user=migration_user,
+                    file_type=file_info['category'],
+                    metadata={
+                        'migrated_from_local': 'true',
+                        'migration_date': datetime.utcnow().isoformat(),
+                        'original_category': file_info['category']
+                    }
+                )
+                
+                if upload_result.get('success'):
+                    # Удаляем локальный файл после успешной загрузки
+                    try:
                         import os
-                        if os.path.exists(task.local_file_path):
-                            os.remove(task.local_file_path)
+                        os.unlink(file_info['path'])
+                        
+                        result['migrated_files'] += 1
+                        result['total_size_gb'] += file_info['size'] / (1024**3)
+                        
+                        logger.debug(f"Migrated file: {file_info['path']}")
+                        
+                    except Exception as e:
+                        logger.warning(f"Failed to delete local file after migration: {e}")
+                else:
+                    result['failed_files'] += 1
+                    result['errors'].append(f"File {file_info['path']}: {upload_result.get('error')}")
                     
-                    # Помечаем как истекший
-                    await session.execute("""
-                        UPDATE download_tasks 
-                        SET local_file_path = NULL,
-                            status = 'expired'
-                        WHERE id = :task_id
-                    """, {"task_id": task.id})
-                    
-                    cleaned_count += 1
-                    
-                except Exception as e:
-                    logger.error(f"Failed to cleanup task {task.id}", error=str(e))
-            
-            await session.commit()
+            except Exception as e:
+                result['failed_files'] += 1
+                result['errors'].append(f"File {file_info['path']}: {str(e)}")
+                logger.error(f"Migration failed for {file_info['path']}: {e}")
         
-        logger.info(f"Cleaned up {cleaned_count} expired downloads")
-        return {"success": True, "cleaned_count": cleaned_count}
+        result['success'] = result['migrated_files'] > 0
+        result['total_size_gb'] = round(result['total_size_gb'], 2)
+        
+        logger.info(f"File migration completed", **result)
+        
+        return result
         
     except Exception as e:
-        logger.error(f"Error in cleanup expired: {e}")
-        return {"success": False, "error": str(e)}
+        logger.error(f"File migration task failed: {e}")
+        result['errors'].append(str(e))
+        return result
 
-@celery_app.task
-def check_download_status(task_id: int) -> Dict[str, Any]:
-    """
-    Проверить статус загрузки
-    
-    Args:
-        task_id: ID задачи
-        
-    Returns:
-        Статус задачи
-    """
-    try:
-        loop = asyncio.new_event_loop()
-        asyncio.set_event_loop(loop)
-        try:
-            result = loop.run_until_complete(_check_status_async(task_id))
-            return result
-        finally:
-            loop.close()
-        
-    except Exception as e:
-        logger.error(f"Failed to check download status", task_id=task_id, error=str(e))
-        return {"success": False, "error": str(e)}
+# Вспомогательные функции
 
-async def _check_status_async(task_id: int) -> Dict[str, Any]:
-    """Асинхронная проверка статуса"""
+async def _update_task_status(task_id: int, status: str, message: str = None):
+    """Обновление статуса задачи в базе данных"""
     try:
         async with get_async_session() as session:
-            result = await session.execute(
-                "SELECT * FROM download_tasks WHERE id = :task_id",
-                {"task_id": task_id}
-            )
-            task_row = result.fetchone()
-            
-            if not task_row:
-                return {"success": False, "error": "Task not found"}
-            
-            return {
-                "success": True,
-                "task_id": task_id,
-                "status": task_row.status,
-                "progress": task_row.progress_percent or 0,
-                "created_at": task_row.created_at.isoformat() if task_row.created_at else None,
-                "started_at": task_row.started_at.isoformat() if task_row.started_at else None,
-                "completed_at": task_row.completed_at.isoformat() if task_row.completed_at else None,
-                "error": task_row.error_message,
-                "file_info": {
-                    "name": task_row.file_name,
-                    "size_bytes": task_row.file_size_bytes,
-                    "format": task_row.file_format
-                } if task_row.status == 'completed' else None
-            }
-            
+            task = await session.get(DownloadTask, task_id)
+            if task:
+                task.status = status
+                if message:
+                    task.progress_message = message
+                task.updated_at = datetime.utcnow()
+                
+                await session.commit()
+                
     except Exception as e:
-        logger.error(f"Error checking status: {e}")
-        return {"success": False, "error": str(e)}
+        logger.error(f"Failed to update task status: {e}")
 
-@celery_app.task
-def cancel_download_task(task_id: int, user_id: int) -> Dict[str, Any]:
-    """
-    Отменить задачу загрузки
-    
-    Args:
-        task_id: ID задачи
-        user_id: ID пользователя (для проверки прав)
-        
-    Returns:
-        Результат операции
-    """
-    logger.info(f"Cancelling download task", task_id=task_id, user_id=user_id)
-    
-    try:
-        loop = asyncio.new_event_loop()
-        asyncio.set_event_loop(loop)
-        try:
-            result = loop.run_until_complete(_cancel_task_async(task_id, user_id))
-            return result
-        finally:
-            loop.close()
-        
-    except Exception as e:
-        logger.error(f"Failed to cancel download task", task_id=task_id, error=str(e))
-        return {"success": False, "error": str(e)}
-
-async def _cancel_task_async(task_id: int, user_id: int) -> Dict[str, Any]:
-    """Асинхронная отмена задачи"""
+async def _update_task_completion(
+    task_id: int,
+    cdn_url: str = None,
+    direct_url: str = None,
+    thumbnail_url: str = None,
+    file_size: int = 0,
+    video_info: dict = None
+):
+    """Обновление завершенной задачи"""
     try:
         async with get_async_session() as session:
-            result = await session.execute(
-                "SELECT * FROM download_tasks WHERE id = :task_id",
-                {"task_id": task_id}
-            )
-            task_row = result.fetchone()
-            
-            if not task_row:
-                return {"success": False, "error": "Task not found"}
-            
-            # Проверяем права
-            if task_row.user_id != user_id:
-                return {"success": False, "error": "Access denied"}
-            
-            # Можно отменить только pending или processing задачи
-            if task_row.status not in ['pending', 'processing']:
-                return {"success": False, "error": "Task cannot be cancelled"}
-            
-            # Отменяем Celery задачу если есть
-            if task_row.celery_task_id:
-                celery_app.control.revoke(task_row.celery_task_id, terminate=True)
-            
-            # Обновляем статус
-            await session.execute("""
-                UPDATE download_tasks 
-                SET status = 'cancelled',
-                    completed_at = :completed_at
-                WHERE id = :task_id
-            """, {
-                "completed_at": datetime.utcnow(),
-                "task_id": task_id
-            })
-            await session.commit()
-        
-        logger.info(f"Download task cancelled", task_id=task_id)
-        return {"success": True, "task_id": task_id}
-        
+            task = await session.get(DownloadTask, task_id)
+            if task:
+                task.status = 'completed'
+                task.cdn_url = cdn_url
+                task.direct_url = direct_url
+                task.thumbnail_url = thumbnail_url
+                task.file_size = file_size
+                task.completed_at = datetime.utcnow()
+                
+                if video_info:
+                    task.title = video_info.get('title')
+                    task.duration = video_info.get('duration')
+                    task.format = video_info.get('format')
+                
+                await session.commit()
+                
     except Exception as e:
-        logger.error(f"Error cancelling task: {e}")
-        return {"success": False, "error": str(e)}
+        logger.error(f"Failed to update task completion: {e}")
 
-@celery_app.task
-def get_download_progress(task_id: int) -> Dict[str, Any]:
-    """
-    Получить прогресс загрузки
-    
-    Args:
-        task_id: ID задачи
-        
-    Returns:
-        Прогресс загрузки
-    """
+async def _update_batch_status(batch_id: int, status: str, message: str = None):
+    """Обновление статуса пакетной задачи"""
     try:
-        # Простая реализация без Redis
-        return {
-            "success": True,
-            "task_id": task_id,
-            "progress": {
-                "percent": 0,
-                "message": "Progress tracking not implemented",
-                "status": "unknown"
-            }
-        }
-        
+        async with get_async_session() as session:
+            from shared.models.download_batch import DownloadBatch
+            
+            batch = await session.get(DownloadBatch, batch_id)
+            if batch:
+                batch.status = status
+                if message:
+                    batch.progress_message = message
+                batch.updated_at = datetime.utcnow()
+                
+                await session.commit()
+                
     except Exception as e:
-        logger.error(f"Failed to get download progress", task_id=task_id, error=str(e))
-        return {"success": False, "error": str(e)}
+        logger.error(f"Failed to update batch status: {e}")
+
+async def _update_batch_completion(
+    batch_id: int,
+    archive_url: str = None,
+    completed_count: int = 0,
+    failed_count: int = 0
+):
+    """Обновление завершенного пакета"""
+    try:
+        async with get_async_session() as session:
+            from shared.models.download_batch import DownloadBatch
+            
+            batch = await session.get(DownloadBatch, batch_id)
+            if batch:
+                batch.archive_url = archive_url
+                batch.completed_count = completed_count
+                batch.failed_count = failed_count
+                batch.completed_at = datetime.utcnow()
+                
+                if completed_count > 0:
+                    batch.status = 'completed'
+                else:
+                    batch.status = 'failed'
+                
+                await session.commit()
+                
+    except Exception as e:
+        logger.error(f"Failed to update batch completion: {e}")
+
+async def _cleanup_local_files(file_paths: List[str]):
+    """Очистка локальных файлов"""
+    try:
+        for file_path in file_paths:
+            try:
+                import os
+                if os.path.exists(file_path):
+                    os.unlink(file_path)
+                    logger.debug(f"Cleaned up local file: {file_path}")
+            except Exception as e:
+                logger.warning(f"Failed to cleanup {file_path}: {e}")
+                
+    except Exception as e:
+        logger.error(f"Cleanup failed: {e}")
+
+def _detect_platform(url: str) -> str:
+    """Определение платформы по URL"""
+    if 'youtube.com' in url or 'youtu.be' in url:
+        return 'youtube'
+    elif 'tiktok.com' in url:
+        return 'tiktok'
+    elif 'instagram.com' in url:
+        return 'instagram'
+    else:
+        return 'unknown'
+
+# Периодические задачи
+
+@celery_app.task(name='periodic_cleanup')
+def periodic_cleanup():
+    """Периодическая очистка файлов (запускается по расписанию)"""
+    return cleanup_old_files_task.delay(max_age_hours=24)
+
+@celery_app.task(name='periodic_migration')
+def periodic_migration():
+    """Периодическая миграция файлов в CDN"""
+    return migrate_files_to_cdn_task.delay(limit=50)
+
+@celery_app.task(name='cdn_health_check')
+async def cdn_health_check():
+    """Проверка здоровья CDN"""
+    try:
+        if await is_cdn_available():
+            from worker.integrations.cdn_upload import cdn_integration
+            stats = await cdn_integration.get_cdn_stats()
+            
+            logger.info("CDN health check completed", stats=stats)
+            return {"status": "healthy", "stats": stats}
+        else:
+            logger.warning("CDN is not available")
+            return {"status": "unavailable"}
+            
+    except Exception as e:
+        logger.error(f"CDN health check failed: {e}")
+        return {"status": "error", "error": str(e)}
