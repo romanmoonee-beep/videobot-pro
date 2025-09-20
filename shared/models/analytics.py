@@ -32,6 +32,7 @@ class EventType:
     DOWNLOAD_STARTED = "download_started"
     DOWNLOAD_COMPLETED = "download_completed"
     DOWNLOAD_FAILED = "download_failed"
+    DOWNLOAD_REQUESTED = "download_requested"
     BATCH_CREATED = "batch_created"
     BATCH_COMPLETED = "batch_completed"
     
@@ -49,21 +50,38 @@ class EventType:
     BOT_STARTED = "bot_started"
     BOT_STOPPED = "bot_stopped"
     ERROR_OCCURRED = "error_occurred"
+    SLOW_REQUEST = "slow_request"
     
     # Контент
     MESSAGE_SENT = "message_sent"
+    MESSAGE_RECEIVED = "message_received"
     BUTTON_CLICKED = "button_clicked"
+    CALLBACK_PRESSED = "callback_pressed"
+    COMMAND_USED = "command_used"
     COMMAND_EXECUTED = "command_executed"
+    
+    # Premium и Trial
+    PREMIUM_ACTIVATED = "premium_activated"
+    PREMIUM_CANCELLED = "premium_cancelled"
+    TRIAL_ACTIVATED = "trial_activated"
+    TRIAL_EXPIRED = "trial_expired"
+    
+    # Рассылки
+    BROADCAST_STARTED = "broadcast_started"
+    BROADCAST_COMPLETED = "broadcast_completed"
     
     ALL = [
         USER_REGISTERED, USER_ACTIVATED, USER_TRIAL_STARTED, 
         USER_PREMIUM_PURCHASED, USER_PREMIUM_EXPIRED, USER_BANNED, USER_UNBANNED,
-        DOWNLOAD_STARTED, DOWNLOAD_COMPLETED, DOWNLOAD_FAILED,
+        DOWNLOAD_STARTED, DOWNLOAD_COMPLETED, DOWNLOAD_FAILED, DOWNLOAD_REQUESTED,
         BATCH_CREATED, BATCH_COMPLETED,
         SUBSCRIPTION_CHECKED, SUBSCRIPTION_FAILED,
         PAYMENT_INITIATED, PAYMENT_COMPLETED, PAYMENT_FAILED, PAYMENT_REFUNDED,
-        BOT_STARTED, BOT_STOPPED, ERROR_OCCURRED,
-        MESSAGE_SENT, BUTTON_CLICKED, COMMAND_EXECUTED
+        BOT_STARTED, BOT_STOPPED, ERROR_OCCURRED, SLOW_REQUEST,
+        MESSAGE_SENT, MESSAGE_RECEIVED, BUTTON_CLICKED, CALLBACK_PRESSED,
+        COMMAND_USED, COMMAND_EXECUTED,
+        PREMIUM_ACTIVATED, PREMIUM_CANCELLED, TRIAL_ACTIVATED, TRIAL_EXPIRED,
+        BROADCAST_STARTED, BROADCAST_COMPLETED
     ]
 
 class BatchStatus:
@@ -250,10 +268,6 @@ class AnalyticsEvent(BaseModel):
     # Constraints и индексы
     __table_args__ = (
         CheckConstraint(
-            event_type.in_(EventType.ALL),
-            name='check_event_type'
-        ),
-        CheckConstraint(
             'event_hour >= 0 AND event_hour <= 23',
             name='check_event_hour_range'
         ),
@@ -267,7 +281,7 @@ class AnalyticsEvent(BaseModel):
         Index('idx_analytics_user_date', 'user_id', 'event_date'),
         Index('idx_analytics_platform_date', 'platform', 'event_date'),
         Index('idx_analytics_date_hour', 'event_date', 'event_hour'),
-        Index('idx_analytics_processed', 'is_processed', 'created_at'),
+        Index('idx_analytics_processed', 'is_processed'),
     )
     
     def __repr__(self) -> str:
@@ -311,10 +325,14 @@ class AnalyticsEvent(BaseModel):
             return 'payment'
         elif event_type.startswith('subscription_'):
             return 'subscription'
-        elif event_type in ['bot_started', 'bot_stopped', 'error_occurred']:
+        elif event_type in ['bot_started', 'bot_stopped', 'error_occurred', 'slow_request']:
             return 'system'
-        elif event_type in ['message_sent', 'button_clicked', 'command_executed']:
+        elif event_type in ['message_sent', 'message_received', 'button_clicked', 'callback_pressed', 'command_used', 'command_executed']:
             return 'interaction'
+        elif event_type.startswith('premium_') or event_type.startswith('trial_'):
+            return 'subscription'
+        elif event_type.startswith('broadcast_'):
+            return 'broadcast'
         else:
             return 'other'
     
@@ -578,53 +596,104 @@ class DailyStats(BaseModel):
 # Утилитарные функции для аналитики
 
 async def track_user_event(event_type: str, user_id: int, telegram_user_id: int,
-                    user_type: str = None, **kwargs):
+                          user_type: str = None, **kwargs):
     """Отследить событие пользователя"""
-    return AnalyticsEvent.track_event(
-        event_type=event_type,
-        user_id=user_id,
-        telegram_user_id=telegram_user_id,
-        user_type=user_type,
-        **kwargs
-    )
+    from shared.config.database import get_async_session
+    
+    try:
+        event = AnalyticsEvent.track_event(
+            event_type=event_type,
+            user_id=user_id,
+            telegram_user_id=telegram_user_id,
+            user_type=user_type,
+            **kwargs
+        )
+        
+        async with get_async_session() as session:
+            session.add(event)
+            await session.commit()
+            return event
+    except Exception as e:
+        import structlog
+        logger = structlog.get_logger(__name__)
+        logger.error(f"Error tracking user event: {e}")
+        return None
 
 async def track_download_event(event_type: str, user_id: int, platform: str,
-                        file_size_mb: float = None, duration_seconds: int = None,
-                        **kwargs):
+                              file_size_mb: float = None, duration_seconds: int = None,
+                              **kwargs):
     """Отследить событие скачивания"""
-    return AnalyticsEvent.track_event(
-        event_type=event_type,
-        user_id=user_id,
-        platform=platform,
-        value=file_size_mb,
-        duration_seconds=duration_seconds,
-        **kwargs
-    )
+    from shared.config.database import get_async_session
+    
+    try:
+        event = AnalyticsEvent.track_event(
+            event_type=event_type,
+            user_id=user_id,
+            platform=platform,
+            value=file_size_mb,
+            duration_seconds=duration_seconds,
+            **kwargs
+        )
+        
+        async with get_async_session() as session:
+            session.add(event)
+            await session.commit()
+            return event
+    except Exception as e:
+        import structlog
+        logger = structlog.get_logger(__name__)
+        logger.error(f"Error tracking download event: {e}")
+        return None
 
 async def track_payment_event(event_type: str, user_id: int, payment_amount: float,
-                       payment_method: str = None, **kwargs):
+                             payment_method: str = None, **kwargs):
     """Отследить событие платежа"""
-    return AnalyticsEvent.track_event(
-        event_type=event_type,
-        user_id=user_id,
-        value=payment_amount,
-        event_data={'payment_method': payment_method},
-        **kwargs
-    )
-
+    from shared.config.database import get_async_session
+    
+    try:
+        event = AnalyticsEvent.track_event(
+            event_type=event_type,
+            user_id=user_id,
+            value=payment_amount,
+            event_data={'payment_method': payment_method},
+            **kwargs
+        )
+        
+        async with get_async_session() as session:
+            session.add(event)
+            await session.commit()
+            return event
+    except Exception as e:
+        import structlog
+        logger = structlog.get_logger(__name__)
+        logger.error(f"Error tracking payment event: {e}")
+        return None
 
 async def track_system_event(event_type: str, event_data: Dict[str, Any] = None,
-                       error_message: str = None, duration_seconds: int = None,
-                       **kwargs):
+                            error_message: str = None, duration_seconds: int = None,
+                            **kwargs):
     """Отследить системное событие"""
-    data = event_data or {}
-    if error_message:
-        data['error_message'] = error_message
+    from shared.config.database import get_async_session
+    
+    try:
+        data = event_data or {}
+        if error_message:
+            data['error_message'] = error_message
 
-    return AnalyticsEvent.track_event(
-        event_type=event_type,
-        event_data=data,
-        duration_seconds=duration_seconds,
-        source='system',
-        **kwargs
-    )
+        event = AnalyticsEvent.track_event(
+            event_type=event_type,
+            event_data=data,
+            duration_seconds=duration_seconds,
+            source='system',
+            **kwargs
+        )
+        
+        async with get_async_session() as session:
+            session.add(event)
+            await session.commit()
+            return event
+    except Exception as e:
+        import structlog
+        logger = structlog.get_logger(__name__)
+        logger.error(f"Error tracking system event: {e}")
+        return None
