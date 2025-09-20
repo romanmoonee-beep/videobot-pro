@@ -29,3 +29,4 @@ api_router.include_router(payments_router, prefix="/payments", tags=["Payments"]
 api_router.include_router(system_router, prefix="/system", tags=["System"])
 
 __all__ = ["api_router"]
+
