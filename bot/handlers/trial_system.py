@@ -554,3 +554,8 @@ def format_trial_time(time_delta: timedelta) -> str:
         return f"{hours}ч {minutes}м"
     else:
         return f"{minutes}м"
+
+@router.callback_query(F.data == "back_trial")
+async def handle_back_to_trial(callback: CallbackQuery):
+    """Возврат к информации о пробном периоде"""
+    await callback.answer("Возврат к trial", show_alert=True)

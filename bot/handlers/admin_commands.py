@@ -489,4 +489,21 @@ async def handle_ban_user(callback: CallbackQuery):
         await callback.answer("Ошибка при блокировке", show_alert=True)
 
 
-# Остальные callback handlers можно добавить аналогично...
+@router.callback_query(F.data == "admin_panel")
+async def handle_admin_panel_callback(callback: CallbackQuery):
+    """Callback версия админ панели"""
+    if not is_admin(callback.from_user.id):
+        await callback.answer("Доступ запрещен", show_alert=True)
+        return
+
+    mock_message = type('MockMessage', (), {
+        'from_user': callback.from_user,
+        'answer': callback.message.edit_text
+    })()
+
+    try:
+        await admin_panel(mock_message)
+        await callback.answer()
+    except Exception as e:
+        logger.error(f"Error in admin panel callback: {e}")
+        await callback.answer("Ошибка в админ панели", show_alert=True)

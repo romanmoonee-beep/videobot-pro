@@ -55,30 +55,16 @@ async def handle_status_callback(callback: CallbackQuery):
     
     try:
         async with get_async_session() as session:
-            user = await session.get(User, user_id)
-            if not user:
-                await callback.answer("Пользователь не найден", show_alert=True)
-                return
+            user = await get_or_create_user(
+                session=session,
+                telegram_id=user_id,
+                username=callback.from_user.username,
+                first_name=callback.from_user.first_name
+            )
+            await update_user_activity(session, user)
+            await session.commit()
             
-            status_text = bot_config.format_user_status(user)
-            
-            # Детальная статистика
-            daily_limit = bot_config.get_user_daily_limit(user.current_user_type)
-            file_limit = bot_config.get_user_file_limit(user.current_user_type)
-            
-            detailed_status = [
-                f"👤 {user.display_name}",
-                f"📊 {status_text}",
-                "",
-                "📈 Подробная информация:",
-                f"• Скачано сегодня: {user.downloads_today}/{daily_limit if daily_limit < 999 else '∞'}",
-                f"• Всего скачано: {user.downloads_total}",
-                f"• Лимит файла: {file_limit}MB",
-                f"• Регистрация: {user.created_at.strftime('%d.%m.%Y')}",
-            ]
-            
-            if user.is_premium_active:
-                detailed_status.append(f"💎 Premium до: {user.premium_expires_at.strftime('%d.%m.%Y')}")
+            status_text = await format_user_status(user)
             
             keyboard = InlineKeyboardMarkup(inline_keyboard=[
                 [InlineKeyboardButton(text="📊 Детальная статистика", callback_data="detailed_stats")],
@@ -87,7 +73,7 @@ async def handle_status_callback(callback: CallbackQuery):
             ])
             
             await callback.message.edit_text(
-                "\n".join(detailed_status),
+                status_text,
                 reply_markup=keyboard
             )
             await callback.answer()
@@ -169,55 +155,6 @@ async def handle_premium_benefits(callback: CallbackQuery):
     await callback.answer()
 
 
-@router.callback_query(F.data == "buy_premium")
-async def handle_buy_premium(callback: CallbackQuery):
-    """Перенаправление к покупке Premium"""
-    await callback.answer("Переходим к оформлению Premium...")
-    
-    # Перенаправляем на premium handler
-    from bot.handlers.premium import show_premium_plans
-    from aiogram.fsm.context import FSMContext
-    
-    # Создаем новый контекст состояния
-    state = FSMContext.get_current()
-    
-    user_id = callback.from_user.id
-    async with get_async_session() as session:
-        user = await get_or_create_user(
-            session=session,
-            telegram_id=user_id,
-            username=callback.from_user.username,
-            first_name=callback.from_user.first_name
-        )
-        await session.commit()
-    
-    await show_premium_plans(callback.message, user, state)
-
-
-@router.callback_query(F.data == "trial")
-async def handle_trial_callback(callback: CallbackQuery):
-    """Перенаправление к пробному периоду"""
-    await callback.answer("Переходим к активации пробного периода...")
-    
-    # Перенаправляем на trial handler
-    from bot.handlers.trial_system import handle_trial_request
-    from aiogram.fsm.context import FSMContext
-    
-    state = FSMContext.get_current()
-    
-    user_id = callback.from_user.id
-    async with get_async_session() as session:
-        user = await get_or_create_user(
-            session=session,
-            telegram_id=user_id,
-            username=callback.from_user.username,
-            first_name=callback.from_user.first_name
-        )
-        await session.commit()
-    
-    await handle_trial_request(callback.message, user, state)
-
-
 @router.callback_query(F.data == "detailed_stats")
 async def handle_detailed_stats(callback: CallbackQuery):
     """Показать детальную статистику"""
@@ -225,10 +162,13 @@ async def handle_detailed_stats(callback: CallbackQuery):
     
     try:
         async with get_async_session() as session:
-            user = await session.get(User, user_id)
-            if not user:
-                await callback.answer("Пользователь не найден", show_alert=True)
-                return
+            user = await get_or_create_user(
+                session=session,
+                telegram_id=user_id,
+                username=callback.from_user.username,
+                first_name=callback.from_user.first_name
+            )
+            await session.commit()
             
             # Получаем расширенную статистику
             stats = user.stats or {}
@@ -293,42 +233,83 @@ async def handle_detailed_stats(callback: CallbackQuery):
 async def handle_export_data(callback: CallbackQuery):
     """Экспорт пользовательских данных"""
     await callback.answer("Функция в разработке", show_alert=True)
-    # TODO: Реализовать экспорт данных в JSON/CSV
 
+
+@router.callback_query(F.data == "cancel")
+async def handle_cancel(callback: CallbackQuery, state: FSMContext):
+    """Универсальная отмена действия"""
+    await state.clear()
+    await callback.message.edit_text(
+        "❌ Действие отменено.\n\n"
+        "💡 Используйте команды для работы с ботом."
+    )
+    await callback.answer("Отменено")
+
+
+# === НОВЫЕ ОБРАБОТЧИКИ ДЛЯ НЕДОСТАЮЩИХ CALLBACK'ОВ ===
+
+@router.callback_query(F.data == "download")
+async def handle_download_callback(callback: CallbackQuery):
+    """Обработка callback'а скачивания"""
+    download_text = [
+        "📥 <b>Скачивание видео</b>",
+        "",
+        "🎬 <b>Поддерживаемые платформы:</b>",
+        "• YouTube Shorts",
+        "• TikTok",
+        "• Instagram Reels",
+        "",
+        "💡 <b>Как скачать:</b>",
+        "1. Скопируйте ссылку на видео",
+        "2. Отправьте ее мне в чат",
+        "3. Получите файл!",
+        "",
+        "📦 <b>Batch загрузка:</b>",
+        "Отправьте несколько ссылок сразу для группового скачивания"
+    ]
+    
+    keyboard = InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="❓ Помощь", callback_data="help")],
+        [InlineKeyboardButton(text="🔙 Назад", callback_data="back_main")]
+    ])
+    
+    await callback.message.edit_text(
+        "\n".join(download_text),
+        reply_markup=keyboard
+    )
+    await callback.answer()
+
+
+# === УТИЛИТЫ ===
 
 async def show_main_menu(message, user: User, edit: bool = False):
     """Показать главное меню"""
+    from bot.keyboards.inline import create_main_menu_keyboard
+    
     # Определяем тип клавиатуры по типу пользователя
-    if bot_config.is_admin(user.telegram_id):
-        keyboard_config = bot_config.keyboards["main_menu"]["admin"]
-    elif user.is_premium_active:
-        keyboard_config = bot_config.keyboards["main_menu"]["premium"]
-    else:
-        keyboard_config = bot_config.keyboards["main_menu"]["free"]
-    
-    # Создаем клавиатуру
-    keyboard_rows = []
-    for row in keyboard_config:
-        button_row = []
-        for button in row:
-            button_row.append(
-                InlineKeyboardButton(
-                    text=button["text"], 
-                    callback_data=button["callback"]
-                )
-            )
-        keyboard_rows.append(button_row)
-    
-    keyboard = InlineKeyboardMarkup(inline_keyboard=keyboard_rows)
+    keyboard = create_main_menu_keyboard(
+        user.current_user_type, 
+        is_admin=bot_config.is_admin(user.telegram_id)
+    )
     
     # Приветственное сообщение
+    daily_limit = bot_config.get_user_daily_limit(user.current_user_type)
+    daily_limit_text = str(daily_limit) if daily_limit < 999 else "∞"
+    
+    user_type_display = {
+        "free": "🆓 Бесплатный",
+        "trial": "🔥 Пробный период", 
+        "premium": "💎 Premium",
+        "admin": "👑 Администратор"
+    }.get(user.current_user_type, user.current_user_type)
+    
     welcome_text = get_message(
         MessageType.WELCOME,
         "returning_user",
         downloads_today=user.downloads_today,
-        daily_limit=bot_config.get_user_daily_limit(user.current_user_type),
+        daily_limit=daily_limit_text,
         total_downloads=user.downloads_total,
-        user_type=bot_config.format_user_status(user)
+        user_type=user_type_display
     )
     
     if edit:
@@ -337,7 +318,56 @@ async def show_main_menu(message, user: User, edit: bool = False):
         await message.answer(welcome_text, reply_markup=keyboard)
 
 
-# Утилиты для работы с callback
+async def format_user_status(user: User) -> str:
+    """Форматирование статуса пользователя"""
+    
+    # Базовая информация
+    user_type_display = {
+        "free": "🆓 Бесплатный",
+        "trial": "🔥 Пробный период",
+        "premium": "💎 Premium", 
+        "admin": "👑 Администратор"
+    }.get(user.current_user_type, user.current_user_type)
+    
+    # Лимиты
+    daily_limit = bot_config.get_user_daily_limit(user.current_user_type)
+    file_limit = bot_config.get_user_file_limit(user.current_user_type)
+    
+    # Построение сообщения
+    status_parts = [
+        f"👤 <b>{user.display_name}</b>",
+        f"🔖 Тип: {user_type_display}",
+        "",
+        "📊 <b>Статистика:</b>",
+        f"• Скачано сегодня: {user.downloads_today}/{daily_limit if daily_limit < 999 else '∞'}",
+        f"• Всего скачано: {user.downloads_total}",
+        f"• Размер файлов: до {file_limit}MB",
+        "",
+        f"📅 Регистрация: {user.created_at.strftime('%d.%m.%Y')}",
+    ]
+    
+    # Дополнительная информация по типу аккаунта
+    if user.current_user_type == "trial" and user.trial_expires_at:
+        from datetime import datetime, timezone
+        remaining = user.trial_expires_at - datetime.now(timezone.utc)
+        if remaining.total_seconds() > 0:
+            hours = int(remaining.total_seconds() // 3600)
+            minutes = int((remaining.total_seconds() % 3600) // 60)
+            time_left = f"{hours}ч {minutes}м" if hours > 0 else f"{minutes}м"
+            status_parts.append(f"⏰ Пробный период: осталось {time_left}")
+    
+    elif user.current_user_type == "premium" and user.premium_expires_at:
+        status_parts.append(f"💎 Premium до: {user.premium_expires_at.strftime('%d.%m.%Y')}")
+    
+    # Проверка подписок для free пользователей
+    if user.current_user_type == "free" and bot_config.required_subs_enabled:
+        if hasattr(user, 'subscription_check_passed') and user.subscription_check_passed:
+            status_parts.append("✅ Подписки: проверены")
+        else:
+            status_parts.append("🔒 Подписки: требуется проверка")
+    
+    return "\n".join(status_parts)
+
 
 def create_back_button(callback_data: str = "back_main") -> InlineKeyboardMarkup:
     """Создать кнопку назад"""
@@ -354,14 +384,3 @@ def create_confirmation_keyboard(confirm_data: str, cancel_data: str = "cancel")
             InlineKeyboardButton(text="❌ Нет", callback_data=cancel_data)
         ]
     ])
-
-
-@router.callback_query(F.data == "cancel")
-async def handle_cancel(callback: CallbackQuery, state: FSMContext):
-    """Универсальная отмена действия"""
-    await state.clear()
-    await callback.message.edit_text(
-        "❌ Действие отменено.\n\n"
-        "💡 Используйте команды для работы с ботом."
-    )
-    await callback.answer("Отменено")

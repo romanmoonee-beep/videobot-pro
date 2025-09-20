@@ -3,6 +3,8 @@ VideoBot Pro - Middlewares Package
 Middleware компоненты для бота
 """
 
+from .callback_debug import CallbackDebugMiddleware
+
 from .rate_limit import RateLimitMiddleware, rate_limit
 from .admin_only import AdminOnlyMiddleware, admin_only
 from .auth import (
@@ -44,6 +46,8 @@ def setup_middlewares(dp: Dispatcher) -> None:
     # Analytics (последним для сбора полных данных)
     dp.message.middleware(AnalyticsMiddleware())
     dp.callback_query.middleware(AnalyticsMiddleware())
+
+    dp.callback_query.middleware(CallbackDebugMiddleware())
 
 __all__ = [
     'setup_middlewares',

@@ -583,3 +583,344 @@ async def handle_clear_history(callback: CallbackQuery):
 @router.callback_query(F.data == "privacy_delete_account")
 async def handle_delete_account(callback: CallbackQuery):
     await callback.answer("Обратитесь в поддержку для удаления аккаунта", show_alert=True)
+    
+    
+# Дополнительные callback обработчики которые отсутствуют
+
+@router.callback_query(F.data == "settings_personalization")
+async def handle_personalization_settings(callback: CallbackQuery):
+    """Настройки персонализации (только для Premium)"""
+    user_id = callback.from_user.id
+    
+    try:
+        async with get_async_session() as session:
+            user = await session.get(User, user_id)
+            if not user or user.current_user_type not in ["premium", "admin"]:
+                await callback.answer("Доступно только для Premium", show_alert=True)
+                return
+        
+        personalization_text = [
+            "🎨 Персонализация интерфейса",
+            "",
+            "🎯 Доступные настройки:",
+            "• Цветовая схема интерфейса",
+            "• Персональные горячие клавиши",
+            "• Кастомные уведомления",
+            "• Избранные платформы",
+            "",
+            "💡 Эти функции находятся в разработке"
+        ]
+        
+        keyboard = InlineKeyboardMarkup(inline_keyboard=[
+            [InlineKeyboardButton(text="🎨 Цвета (скоро)", callback_data="personalization_colors")],
+            [InlineKeyboardButton(text="🔧 Горячие клавиши (скоро)", callback_data="personalization_hotkeys")],
+            [InlineKeyboardButton(text="🔙 Назад", callback_data="settings")]
+        ])
+        
+        await callback.message.edit_text("\n".join(personalization_text), reply_markup=keyboard)
+        await callback.answer()
+        
+    except Exception as e:
+        logger.error(f"Error in personalization settings: {e}", user_id=user_id)
+        await callback.answer("Ошибка при загрузке настроек", show_alert=True)
+
+
+@router.callback_query(F.data == "settings_advanced")
+async def handle_advanced_settings(callback: CallbackQuery):
+    """Расширенные настройки (только для Premium)"""
+    user_id = callback.from_user.id
+    
+    try:
+        async with get_async_session() as session:
+            user = await session.get(User, user_id)
+            if not user or user.current_user_type not in ["premium", "admin"]:
+                await callback.answer("Доступно только для Premium", show_alert=True)
+                return
+        
+        advanced_text = [
+            "🔧 Расширенные настройки",
+            "",
+            "⚡ Настройки производительности:",
+            "• Приоритет обработки",
+            "• Кэширование файлов",
+            "• Автоочистка старых файлов",
+            "",
+            "📊 Аналитика:",
+            "• Детальная статистика",
+            "• Экспорт данных",
+            "• История операций",
+            "",
+            "🔒 Безопасность:",
+            "• Двухфакторная аутентификация",
+            "• Ограничения по IP",
+            "• Логи доступа"
+        ]
+        
+        keyboard = InlineKeyboardMarkup(inline_keyboard=[
+            [InlineKeyboardButton(text="⚡ Производительность", callback_data="advanced_performance")],
+            [InlineKeyboardButton(text="📊 Аналитика", callback_data="advanced_analytics")],
+            [InlineKeyboardButton(text="🔒 Безопасность", callback_data="advanced_security")],
+            [InlineKeyboardButton(text="🔙 Назад", callback_data="settings")]
+        ])
+        
+        await callback.message.edit_text("\n".join(advanced_text), reply_markup=keyboard)
+        await callback.answer()
+        
+    except Exception as e:
+        logger.error(f"Error in advanced settings: {e}", user_id=user_id)
+        await callback.answer("Ошибка при загрузке настроек", show_alert=True)
+
+
+# Обработчики для недостающих callback'ов из других модулей
+
+@router.callback_query(F.data.startswith("personalization_"))
+async def handle_personalization_callbacks(callback: CallbackQuery):
+    """Обработчики персонализации"""
+    await callback.answer("Функция в разработке", show_alert=True)
+
+
+@router.callback_query(F.data.startswith("advanced_"))
+async def handle_advanced_callbacks(callback: CallbackQuery):
+    """Обработчики расширенных настроек"""
+    await callback.answer("Функция в разработке", show_alert=True)
+
+
+# === ДОБАВИТЬ В КОНЕЦ ФАЙЛА bot/handlers/premium.py ===
+
+@router.callback_query(F.data == "premium_info")
+async def handle_premium_info_callback(callback: CallbackQuery):
+    """Показать информацию о Premium (callback версия)"""
+    user_id = callback.from_user.id
+    
+    try:
+        async with get_async_session() as session:
+            user = await get_or_create_user(
+                session=session,
+                telegram_id=user_id,
+                username=callback.from_user.username,
+                first_name=callback.from_user.first_name
+            )
+            await session.commit()
+        
+        # Проверяем текущий статус Premium
+        if user.is_premium_active:
+            await show_premium_status(callback.message, user)
+        else:
+            from aiogram.fsm.context import FSMContext
+            state = FSMContext.get_current()
+            await show_premium_plans(callback.message, user, state)
+            
+        await callback.answer()
+        
+    except Exception as e:
+        logger.error(f"Error in premium info callback: {e}", user_id=user_id)
+        await callback.answer("Ошибка при загрузке Premium информации", show_alert=True)
+
+
+@router.callback_query(F.data == "renew_premium")
+async def handle_renew_premium(callback: CallbackQuery):
+    """Обработка продления Premium"""
+    user_id = callback.from_user.id
+    
+    try:
+        from aiogram.fsm.context import FSMContext
+        state = FSMContext.get_current()
+        
+        async with get_async_session() as session:
+            user = await get_or_create_user(
+                session=session,
+                telegram_id=user_id,
+                username=callback.from_user.username,
+                first_name=callback.from_user.first_name
+            )
+            await session.commit()
+        
+        await show_premium_plans(callback.message, user, state)
+        await callback.answer("Выберите план для продления")
+        
+    except Exception as e:
+        logger.error(f"Error renewing premium: {e}", user_id=user_id)
+        await callback.answer("Ошибка при продлении Premium", show_alert=True)
+
+
+@router.callback_query(F.data == "enable_auto_renew")
+async def handle_enable_auto_renew(callback: CallbackQuery):
+    """Включить автопродление Premium"""
+    user_id = callback.from_user.id
+    
+    try:
+        async with get_async_session() as session:
+            user = await session.get(User, user_id)
+            if not user or not user.is_premium_active:
+                await callback.answer("Premium не активен", show_alert=True)
+                return
+            
+            user.premium_auto_renew = True
+            await session.commit()
+            
+            await callback.answer("Автопродление включено!", show_alert=True)
+            
+            # Обновляем сообщение
+            await show_premium_status(callback.message, user)
+            
+    except Exception as e:
+        logger.error(f"Error enabling auto renew: {e}", user_id=user_id)
+        await callback.answer("Ошибка при включении автопродления", show_alert=True)
+
+
+# === ДОБАВИТЬ В КОНЕЦ ФАЙЛА bot/handlers/trial_system.py ===
+
+@router.callback_query(F.data == "back_trial")
+async def handle_back_to_trial(callback: CallbackQuery):
+    """Возврат к информации о пробном периоде"""
+    user_id = callback.from_user.id
+    
+    try:
+        async with get_async_session() as session:
+            user = await get_or_create_user(
+                session=session,
+                telegram_id=user_id,
+                username=callback.from_user.username,
+                first_name=callback.from_user.first_name
+            )
+            await session.commit()
+        
+        from aiogram.fsm.context import FSMContext
+        state = FSMContext.get_current()
+        
+        await handle_trial_request(callback.message, user, state)
+        await callback.answer()
+        
+    except Exception as e:
+        logger.error(f"Error in back to trial: {e}", user_id=user_id)
+        await callback.answer("Ошибка", show_alert=True)
+
+
+@router.callback_query(F.data == "buy_premium_trial_discount")
+async def handle_buy_premium_with_discount(callback: CallbackQuery):
+    """Покупка Premium со скидкой для trial пользователей"""
+    user_id = callback.from_user.id
+    
+    try:
+        async with get_async_session() as session:
+            user = await session.get(User, user_id)
+            if not user or not user.is_trial_active:
+                await callback.answer("Скидка доступна только во время пробного периода", show_alert=True)
+                return
+        
+        discount_text = [
+            "🎉 Специальная скидка 20% для trial пользователей!",
+            "",
+            "💎 Premium со скидкой:",
+            "• Месячный план: $3.19 вместо $3.99",
+            "• Квартальный план: $7.99 вместо $9.99", 
+            "• Годовой план: $23.99 вместо $29.99",
+            "",
+            "⏰ Скидка действует только до окончания пробного периода!",
+            "",
+            "🎁 Бонус: неиспользованное время trial засчитается!"
+        ]
+        
+        keyboard = InlineKeyboardMarkup(inline_keyboard=[
+            [InlineKeyboardButton(text="💳 Месячный со скидкой", callback_data="premium_plan_monthly_discount")],
+            [InlineKeyboardButton(text="💳 Квартальный со скидкой", callback_data="premium_plan_quarterly_discount")],
+            [InlineKeyboardButton(text="💳 Годовой со скидкой", callback_data="premium_plan_yearly_discount")],
+            [InlineKeyboardButton(text="🔙 Назад", callback_data="trial")]
+        ])
+        
+        await callback.message.edit_text("\n".join(discount_text), reply_markup=keyboard)
+        await callback.answer()
+        
+    except Exception as e:
+        logger.error(f"Error in trial discount: {e}", user_id=user_id)
+        await callback.answer("Ошибка при применении скидки", show_alert=True)
+
+
+# === ДОБАВИТЬ В КОНЕЦ ФАЙЛА bot/handlers/admin_commands.py ===
+
+@router.callback_query(F.data == "admin_panel")
+async def handle_admin_panel_callback(callback: CallbackQuery):
+    """Callback версия админ панели"""
+    if not is_admin(callback.from_user.id):
+        await callback.answer("Доступ запрещен", show_alert=True)
+        return
+    
+    # Создаем mock объект для совместимости с существующей функцией
+    mock_message = type('MockMessage', (), {
+        'from_user': callback.from_user,
+        'answer': callback.message.edit_text,
+        'edit_text': callback.message.edit_text
+    })()
+    
+    try:
+        await admin_panel(mock_message)
+        await callback.answer()
+    except Exception as e:
+        logger.error(f"Error in admin panel callback: {e}")
+        await callback.answer("Ошибка в админ панели", show_alert=True)
+
+
+# Дополнительные обработчики для админских callback'ов
+@router.callback_query(F.data.startswith("admin_") & ~F.data.in_(["admin_panel", "admin_users", "admin_stats"]))
+async def handle_other_admin_callbacks(callback: CallbackQuery):
+    """Обработчик для остальных админских callback'ов"""
+    if not is_admin(callback.from_user.id):
+        await callback.answer("Доступ запрещен", show_alert=True)
+        return
+    
+    callback_data = callback.data
+    
+    # Маппинг админских callback'ов
+    admin_handlers = {
+        "admin_broadcast": "Создание рассылки в разработке",
+        "admin_channels": "Управление каналами в разработке", 
+        "admin_finance": "Финансовая панель в разработке",
+        "admin_system": "Системные настройки в разработке",
+        "admin_logs": "Просмотр логов в разработке",
+        "admin_settings": "Админские настройки в разработке"
+    }
+    
+    message = admin_handlers.get(callback_data, "Функция в разработке")
+    await callback.answer(message, show_alert=True)
+
+
+# === БЫСТРЫЕ ЗАГЛУШКИ ДЛЯ ОСТАЛЬНЫХ CALLBACK'ОВ ===
+
+# Эти обработчики можно добавить в любой из файлов или в universal_callback.py
+
+async def handle_missing_callbacks():
+    """Список всех недостающих callback'ов с заглушками"""
+    
+    missing_callbacks = {
+        # Subscription callbacks
+        "support": "Обратитесь в поддержку @support_bot",
+        
+        # Navigation callbacks  
+        "back": "Возврат в предыдущее меню",
+        
+        # Feature callbacks
+        "referral": "Реферальная программа в разработке",
+        "export_stats_only": "Экспорт статистики в разработке",
+        "privacy_policy": "Политика конфиденциальности доступна на сайте",
+        
+        # Trial specific
+        "trial_info": "Информация о пробном периоде",
+        
+        # Batch operations
+        "confirm_small_batch": "Подтверждение малого batch",
+        
+        # Admin operations
+        "admin_new_users": "Список новых пользователей",
+        "admin_premium_users": "Список Premium пользователей", 
+        "admin_banned_users": "Список заблокированных пользователей",
+        
+        # Premium operations
+        "upgrade_to_premium": "Переход на Premium",
+        
+        # Settings operations
+        "back_settings": "Возврат к настройкам"
+    }
+    
+    return missing_callbacks
+
+

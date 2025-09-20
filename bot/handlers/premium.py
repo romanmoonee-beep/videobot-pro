@@ -588,3 +588,38 @@ async def process_crypto_payment(callback: CallbackQuery, plan_key: str, plan: D
         "Функция в разработке.\n"
         "Попробуйте Telegram платежи."
     )
+
+
+@router.callback_query(F.data == "premium_info")
+async def handle_premium_info_callback(callback: CallbackQuery):
+    """Показать информацию о Premium (callback версия)"""
+    user_id = callback.from_user.id
+
+    try:
+        async with get_async_session() as session:
+            user = await get_or_create_user(
+                session=session,
+                telegram_id=user_id,
+                username=callback.from_user.username,
+                first_name=callback.from_user.first_name
+            )
+            await session.commit()
+
+        if user.is_premium_active:
+            await show_premium_status(callback.message, user)
+        else:
+            from aiogram.fsm.context import FSMContext
+            state = FSMContext.get_current()
+            await show_premium_plans(callback.message, user, state)
+
+        await callback.answer()
+
+    except Exception as e:
+        logger.error(f"Error in premium info callback: {e}", user_id=user_id)
+        await callback.answer("Ошибка при загрузке Premium информации", show_alert=True)
+
+
+@router.callback_query(F.data == "renew_premium")
+async def handle_renew_premium(callback: CallbackQuery):
+    """Обработка продления Premium"""
+    await callback.answer("Функция продления в разработке", show_alert=True)
