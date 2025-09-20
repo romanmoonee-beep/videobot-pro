@@ -172,7 +172,9 @@ class DownloadTask(BaseModel):
         comment="Приоритет задачи (1-10)"
     )
 
-    user: Mapped["User"] = relationship("User", back_populates="downloads")
+    # ИСПРАВЛЕНО: Правильные relationships
+    user = relationship("User", back_populates="download_tasks")
+    batch = relationship("DownloadBatch", back_populates="download_tasks")
 
     # Constraints и индексы
     __table_args__ = (
