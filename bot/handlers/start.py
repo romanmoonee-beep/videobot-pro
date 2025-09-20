@@ -436,6 +436,92 @@ async def handle_deep_link_params(message: Message, params: str):
         logger.error(f"Error handling deep link params: {e}", params=params)
 
 
+@router.message(F.text.regexp(r'https?://'))
+async def handle_single_url(message: Message, state: FSMContext):
+    """Обработка одиночной ссылки на видео"""
+    user_id = message.from_user.id
+
+    try:
+        # Очищаем состояние
+        await state.clear()
+
+        # Извлекаем URL
+        from bot.utils.url_extractor import extract_video_urls, validate_url, detect_platform
+
+        urls = extract_video_urls(message.text)
+
+        if not urls:
+            await message.answer("❌ Не найдено поддерживаемых ссылок")
+            return
+
+        # Берем первую ссылку
+        url = urls[0]
+
+        if not validate_url(url):
+            await message.answer("❌ Неподдерживаемая ссылка")
+            return
+
+        platform = detect_platform(url)
+
+        # Получаем пользователя
+        async with get_async_session() as session:
+            user = await get_or_create_user(
+                session=session,
+                telegram_id=user_id,
+                username=message.from_user.username,
+                first_name=message.from_user.first_name
+            )
+            await session.commit()
+
+        # Проверяем лимиты
+        if not user.can_download_today():
+            daily_limit = bot_config.get_user_daily_limit(user.current_user_type)
+            await message.answer(
+                f"⏰ Дневной лимит исчерпан ({daily_limit})\n"
+                f"💎 Premium: безлимитные скачивания!"
+            )
+            return
+
+        # Отправляем сообщение о начале обработки
+        processing_msg = await message.answer(
+            f"⏳ Начинаю загрузку...\n"
+            f"🔗 Платформа: {platform.title()}\n"
+            f"📱 Отправлю файл в чат"
+        )
+
+        # Используем batch сервис для создания одиночной загрузки
+        from bot.services.batch_service import batch_service
+
+        batch = await batch_service.create_batch_from_urls(
+            user=user,
+            urls=[url],
+            delivery_method="individual"
+        )
+
+        # Запускаем обработку
+        celery_task_id = await batch_service.start_batch_processing(batch)
+
+        # Обновляем сообщение
+        await processing_msg.edit_text(
+            f"✅ Загрузка запущена!\n"
+            f"🔗 Платформа: {platform.title()}\n"
+            f"📊 ID: {batch.batch_id}\n"
+            f"⏱️ Примерное время: 1-3 минуты"
+        )
+
+        logger.info(
+            f"Single download started",
+            user_id=user_id,
+            platform=platform,
+            batch_id=batch.id,
+            celery_task_id=celery_task_id
+        )
+
+    except Exception as e:
+        logger.error(f"Error processing single URL: {e}", user_id=user_id)
+        await message.answer("❌ Произошла ошибка при обработке ссылки. Попробуйте позже.")
+
+
 async def handle_referral_link(message: Message, referrer_id: int):
     """Обработка реферальной ссылки"""
     
@@ -474,6 +560,6 @@ async def handle_referral_link(message: Message, referrer_id: int):
                 new_user_id=user_id, 
                 referrer_id=referrer_id
             )
-    
+
     except Exception as e:
         logger.error(f"Error processing referral: {e}")

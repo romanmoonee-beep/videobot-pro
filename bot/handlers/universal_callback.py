@@ -10,6 +10,9 @@ from aiogram import Router, F
 from aiogram.types import CallbackQuery
 from aiogram.fsm.context import FSMContext
 
+from shared.config.database import get_async_session
+from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
+from bot.config import bot_config
 from bot.utils.user_manager import get_or_create_user
 
 logger = structlog.get_logger(__name__)
@@ -80,30 +83,59 @@ CALLBACK_ROUTES = {
 async def universal_callback_handler(callback: CallbackQuery, state: FSMContext):
     """
     Универсальный обработчик всех callback запросов
-    Перенаправляет на соответствующие специализированные обработчики
     """
     callback_data = callback.data
     user_id = callback.from_user.id
-    
-    logger.info(f"Processing callback: {callback_data}", user_id=user_id)
-    
-    # Проверяем прямые маппинги
-    if callback_data in CALLBACK_ROUTES:
-        route = CALLBACK_ROUTES[callback_data]
-        return await route_callback(callback, state, route)
-    
-    # Проверяем префиксы
-    for prefix, handler in get_prefix_handlers().items():
-        if callback_data.startswith(prefix):
-            return await handler(callback, state)
-    
-    # Если обработчик не найден
-    logger.warning(f"Unhandled callback: {callback_data}", user_id=user_id)
-    await callback.answer(
-        "⚠️ Функция временно недоступна", 
-        show_alert=True
-    )
 
+    logger.info(f"Processing callback: {callback_data}", user_id=user_id)
+
+    try:
+        # Получаем пользователя из БД
+        async with get_async_session() as session:
+            from bot.utils.user_manager import get_or_create_user
+            user = await get_or_create_user(
+                session=session,
+                telegram_id=user_id,
+                username=callback.from_user.username,
+                first_name=callback.from_user.first_name
+            )
+            await session.commit()
+
+        # Реальные обработчики callback'ов
+        if callback_data == "status":
+            await show_user_status(callback, user)
+
+        elif callback_data == "settings":
+            await show_settings_menu(callback, user)
+
+        elif callback_data == "help":
+            await show_help_menu(callback)
+
+        elif callback_data == "download":
+            await show_download_info(callback)
+
+        elif callback_data == "trial":
+            await handle_trial_request(callback, user, state)
+
+        elif callback_data == "premium_info" or callback_data == "buy_premium":
+            await handle_premium_request(callback, user, state)
+
+        elif callback_data == "back_main":
+            await show_main_menu(callback, user)
+
+        elif callback_data == "admin_panel":
+            if bot_config.is_admin(user_id):
+                await show_admin_panel(callback)
+            else:
+                await callback.answer("🚫 Доступ запрещен", show_alert=True)
+
+        # Остальные callback'и
+        else:
+            await callback.answer("Функция в разработке", show_alert=True)
+
+    except Exception as e:
+        logger.error(f"Error in callback handler: {e}", user_id=user_id)
+        await callback.answer("Произошла ошибка", show_alert=True)
 
 async def route_callback(callback: CallbackQuery, state: FSMContext, route: str):
     """Перенаправление callback'а к соответствующему обработчику"""

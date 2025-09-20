@@ -6,7 +6,7 @@ VideoBot Pro - Batch Download Handler
 import asyncio
 import re
 import structlog
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from typing import List, Dict, Any, Optional
 
 from aiogram import Router, F
@@ -469,7 +469,14 @@ async def create_download_batch(session, user: User, urls: List[str],
     # Устанавливаем время истечения
     retention_hours = bot_config.get_user_limits(user.current_user_type)
     if hasattr(retention_hours, '__getitem__'):
-        hours = 24  # default fallback
+        hours = 24
+        if user.current_user_type == "premium":
+            hours = 24 * 30
+        elif user.current_user_type == "admin":
+            hours = 24 * 365
+
+        batch.expires_at = datetime.now(timezone.utc) + timedelta(hours=hours)
+
     else:
         hours = retention_hours
     batch.set_expiration(hours)

@@ -78,7 +78,37 @@ class BotConfig:
         
         # Клавиатуры
         self.keyboards = self._setup_keyboard_configs()
-    
+
+    def get_user_daily_limit(self, user_type: str) -> int:
+        """Получить дневной лимит скачиваний для типа пользователя"""
+        limits = {
+            "free": 10,
+            "trial": 999,  # безлимитно во время trial
+            "premium": 999,  # безлимитно
+            "admin": 999  # безлимитно
+        }
+        return limits.get(user_type, 10)
+
+    def get_user_file_limit(self, user_type: str) -> int:
+        """Получить лимит размера файла в MB для типа пользователя"""
+        limits = {
+            "free": 50,
+            "trial": 500,
+            "premium": 500,
+            "admin": 1000
+        }
+        return limits.get(user_type, 50)
+
+    def get_user_quality_limit(self, user_type: str) -> str:
+        """Получить максимальное качество для типа пользователя"""
+        limits = {
+            "free": "720p",
+            "trial": "1080p",
+            "premium": "2160p",
+            "admin": "2160p"
+        }
+        return limits.get(user_type, "720p")
+
     def is_admin(self, user_id: int) -> bool:
         """Проверить является ли пользователь админом"""
         return user_id in self.admin_ids or user_id == self.super_admin_id

@@ -143,11 +143,11 @@ class AuthMiddleware(BaseMiddleware):
         
         if user.ban_reason:
             ban_message += f"\nПричина: {user.ban_reason}"
-        
+
         if user.banned_until:
             ban_message += f"\nБлокировка до: {user.banned_until.strftime('%d.%m.%Y %H:%M')}"
         
-        if user.banned_until and datetime.utcnow() > user.banned_until:
+        if user.banned_until and datetime.now(timezone.utc) > user.banned_until:
             # Автоматическое разблокирование
             try:
                 async with get_async_session() as session:
