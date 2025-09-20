@@ -4,7 +4,7 @@ VideoBot Pro - Start Command Handler
 """
 
 import structlog
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from typing import Optional
 
 from aiogram import Router, F
@@ -135,7 +135,7 @@ async def show_trial_active_message(message: Message, user: User):
     
     # Рассчитываем оставшееся время
     if user.trial_expires_at:
-        remaining = user.trial_expires_at - datetime.utcnow()
+        remaining = user.trial_expires_at - datetime.now(timezone.utc)
         hours = int(remaining.total_seconds() // 3600)
         minutes = int((remaining.total_seconds() % 3600) // 60)
         time_left = f"{hours}ч {minutes}м" if hours > 0 else f"{minutes}м"
@@ -342,7 +342,7 @@ async def format_user_status(user: User) -> str:
     
     # Дополнительная информация по типу аккаунта
     if user.current_user_type == "trial" and user.trial_expires_at:
-        remaining = user.trial_expires_at - datetime.utcnow()
+        remaining = user.trial_expires_at - (datetime.now(timezone.utc))
         if remaining.total_seconds() > 0:
             hours = int(remaining.total_seconds() // 3600)
             minutes = int((remaining.total_seconds() % 3600) // 60)

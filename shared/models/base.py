@@ -5,7 +5,7 @@ VideoBot Pro - Base Models
 
 from datetime import datetime
 from typing import Any, Dict, Optional
-from sqlalchemy import DateTime, func, Integer, String, Text
+from sqlalchemy import DateTime, func, Integer, String, Text, BigInteger
 from sqlalchemy.ext.declarative import declared_attr
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
 from sqlalchemy.dialects.postgresql import UUID, JSON
@@ -50,7 +50,7 @@ class IDMixin:
     """
     
     id: Mapped[int] = mapped_column(
-        Integer,
+        BigInteger,
         primary_key=True,
         autoincrement=True,
         comment="Уникальный идентификатор записи"

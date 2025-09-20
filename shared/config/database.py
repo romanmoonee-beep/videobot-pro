@@ -16,7 +16,7 @@ import structlog
 from datetime import datetime, timedelta
 
 # ИСПРАВЛЕНО: добавляем правильный импорт
-from ..models import Base, TABLES, AnalyticsEvent
+from ..models import Base, TABLES
 
 logger = structlog.get_logger(__name__)
 
@@ -95,7 +95,7 @@ class DatabaseConfig:
                 logger.error(f"Async DB session error: {e}")
                 raise
 
-    @asynccontextmanager 
+    @asynccontextmanager
     async def get_sync_session(self) -> AsyncGenerator[Session, None]:
         if not self._initialized:
             await self.initialize()

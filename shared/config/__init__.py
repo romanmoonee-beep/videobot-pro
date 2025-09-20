@@ -86,3 +86,7 @@ async def close_all_services():
     if close_redis:
         await close_redis()
     await close_database()
+
+
+def CELERY_BROKER_URL():
+    return None

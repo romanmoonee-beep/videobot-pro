@@ -5,12 +5,12 @@ VideoBot Pro - Authentication Middleware
 
 import structlog
 from typing import Any, Awaitable, Callable, Dict, Optional
-from datetime import datetime
+from datetime import datetime, timezone
 
 from aiogram import BaseMiddleware
 from aiogram.types import Message, CallbackQuery, Update, User as TelegramUser
 
-from sqlalchemy import text
+from sqlalchemy import text, select
 
 from shared.config.database import get_async_session
 from shared.models import User, EventType
@@ -123,14 +123,13 @@ class AuthMiddleware(BaseMiddleware):
                 else:
                     # Только получаем существующего пользователя
                     result = await session.execute(
-                        text("SELECT * FROM users WHERE telegram_id = :telegram_id"),
-                        {'telegram_id': user_id}
+                        select(User).where(User.telegram_id == user_id)
                     )
-                    user = result.first()
+                    user = result.scalar_one_or_none()
                 
                 # Кешируем пользователя
                 if user:
-                    self._user_cache[cache_key] = (user, datetime.utcnow())
+                    self._user_cache[cache_key] = (user, datetime.now(timezone.utc))
                 
                 return user
         
@@ -152,7 +151,11 @@ class AuthMiddleware(BaseMiddleware):
             # Автоматическое разблокирование
             try:
                 async with get_async_session() as session:
-                    db_user = await session.get(User, user.id)
+                    # Получаем fresh copy пользователя
+                    result = await session.execute(
+                        select(User).where(User.id == user.id)
+                    )
+                    db_user = result.scalar_one_or_none()
                     if db_user:
                         db_user.unban_user()
                         await session.commit()
@@ -181,7 +184,10 @@ class AuthMiddleware(BaseMiddleware):
             
             async with get_async_session() as session:
                 # Получаем свежую копию пользователя из БД
-                fresh_user = await session.get(User, user.id)
+                result = await session.execute(
+                    select(User).where(User.id == user.id)
+                )
+                fresh_user = result.scalar_one_or_none()
                 if fresh_user:
                     await update_user_activity(session, fresh_user, message_id)
                     await session.commit()
@@ -202,7 +208,7 @@ class AuthMiddleware(BaseMiddleware):
         cache_key = f"user_{user_id}"
         if cache_key in self._user_cache:
             cached_user, cached_time = self._user_cache[cache_key]
-            if (datetime.utcnow() - cached_time).total_seconds() < self._cache_ttl:
+            if (datetime.now(timezone.utc) - cached_time).total_seconds() < self._cache_ttl:
                 return cached_user
         return None
 

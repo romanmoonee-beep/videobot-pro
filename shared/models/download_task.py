@@ -198,12 +198,12 @@ class DownloadTask(BaseModel):
             'priority >= 1 AND priority <= 10',
             name='check_priority_range'
         ),
-        # Используем правильные ссылки на колонки
-        Index('idx_task_user_status', 'user_id', 'status'),
-        Index('idx_task_batch_order', 'batch_id', 'priority'),
-        Index('idx_task_platform_status', 'platform', 'status'),
-        Index('idx_task_expires_at', 'expires_at'),
-        Index('idx_task_priority_status', 'priority', 'status'),
+        # Исправленные индексы
+        Index('idx_task_user_status', user_id, status),
+        Index('idx_task_batch_order', batch_id, priority),
+        Index('idx_task_platform_status', platform, status),
+        Index('idx_task_expires_at', expires_at),
+        Index('idx_task_priority_status', priority, status),
     )
     
     def __repr__(self) -> str:

@@ -4,11 +4,11 @@ VideoBot Pro - User Manager
 """
 
 import structlog
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from typing import Optional, Dict, Any
 
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import text
+from sqlalchemy import text, select
 from shared.models import User, UserType, EventType
 from shared.models.analytics import track_user_event
 from bot.config import bot_config
@@ -40,10 +40,9 @@ async def get_or_create_user(
     """
     # Пытаемся найти существующего пользователя
     result = await session.execute(
-        text("SELECT * FROM users WHERE telegram_id = :telegram_id"),
-        {'telegram_id': telegram_id}
+        select(User).where(User.telegram_id == telegram_id)
     )
-    user = result.first()
+    user = result.scalar_one_or_none()
     
     if user:
         # Обновляем информацию если она изменилась
@@ -78,15 +77,15 @@ async def get_or_create_user(
             last_name=last_name,
             language_code=language_code,
             user_type=UserType.FREE,
-            created_at=datetime.utcnow(),
-            last_active_at=datetime.utcnow(),
-            is_active=True
+            created_at=datetime.now(timezone.utc),
+            last_active_at=datetime.now(timezone.utc)
+            # УБРАЛИ is_active=True - это поле отсутствует в модели
         )
         
         # Проверяем, является ли пользователь админом
         if bot_config.is_admin(telegram_id):
             user.user_type = UserType.ADMIN
-            user.is_admin = True
+            # УБРАЛИ user.is_admin = True - используем user_type
         
         session.add(user)
         await session.flush()
@@ -117,15 +116,15 @@ async def update_user_activity(
         user: Объект пользователя
         message_id: ID последнего сообщения
     """
-    user.last_active_at = datetime.utcnow()
+    user.last_active_at = datetime.now(timezone.utc)
     
     if message_id:
         user.last_message_id = message_id
     
     # Увеличиваем счетчик сессий если прошло больше часа
-    if not user.last_session_at or (datetime.utcnow() - user.last_session_at) > timedelta(hours=1):
+    if not user.last_session_at or (datetime.now(timezone.utc) - user.last_session_at) > timedelta(hours=1):
         user.session_count = (user.session_count or 0) + 1
-        user.last_session_at = datetime.utcnow()
+        user.last_session_at = datetime.now(timezone.utc)
     
     await session.flush()
 
@@ -155,13 +154,13 @@ async def check_user_limits(user: User) -> Dict[str, Any]:
     trial_active = user.is_trial_active
     trial_remaining = None
     if trial_active and user.trial_expires_at:
-        trial_remaining = user.trial_expires_at - datetime.utcnow()
+        trial_remaining = user.trial_expires_at - datetime.now(timezone.utc)
     
     # Проверяем premium статус
     premium_active = user.is_premium_active
     premium_remaining = None
     if premium_active and user.premium_expires_at:
-        premium_remaining = user.premium_expires_at - datetime.utcnow()
+        premium_remaining = user.premium_expires_at - datetime.now(timezone.utc)
     
     return {
         'can_download': can_download,
@@ -228,7 +227,7 @@ async def reset_user_daily_limits(session: AsyncSession) -> int:
     try:
         # Сбрасываем счетчики для всех пользователей
         result = await session.execute(
-            "UPDATE users SET downloads_today = 0 WHERE downloads_today > 0"
+            text("UPDATE users SET downloads_today = 0 WHERE downloads_today > 0")
         )
         
         count = result.rowcount

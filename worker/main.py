@@ -91,7 +91,7 @@ class WorkerManager:
     async def _start_celery_worker(self):
         """Запуск Celery worker'а"""
         # Импортируем все задачи для регистрации
-        from . import tasks
+        # from . import tasks
 
         logger.info(f"Starting Celery worker with concurrency: {worker_config.worker_concurrency}")
 

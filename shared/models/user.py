@@ -3,7 +3,7 @@ VideoBot Pro - User Model
 Модель пользователя системы
 """
 
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from typing import Optional, Dict, Any, List
 from sqlalchemy import (
     BigInteger, String, Boolean, DateTime, Integer, 
@@ -75,7 +75,7 @@ class User(BaseModel, SoftDeleteMixin):
         index=True,
         comment="Заблокирован ли пользователь"
     )
-    
+
     ban_reason: Mapped[Optional[str]] = mapped_column(
         Text,
         nullable=True,
@@ -102,7 +102,15 @@ class User(BaseModel, SoftDeleteMixin):
         index=True,
         comment="Есть ли у пользователя Premium подписка"
     )
-    
+
+    is_active: Mapped[bool] = mapped_column(
+        Boolean,
+        default=True,
+        nullable=False,
+        index=True,
+        comment="Активен ли пользователь"
+    )
+
     premium_started_at: Mapped[Optional[datetime]] = mapped_column(
         DateTime(timezone=True),
         nullable=True,
@@ -274,6 +282,12 @@ class User(BaseModel, SoftDeleteMixin):
         comment="Заметки администрации"
     )
 
+    last_session_at: Mapped[Optional[datetime]] = mapped_column(
+        DateTime(timezone=True),
+        nullable=True,
+        comment="Время последней сессии пользователя"
+    )
+
     # ИСПРАВЛЕНО: Правильные relationships
     download_batches = relationship("DownloadBatch", back_populates="user")
     download_tasks = relationship("DownloadTask", back_populates="user")
@@ -325,14 +339,14 @@ class User(BaseModel, SoftDeleteMixin):
         """Активен ли пробный период"""
         if not self.trial_expires_at:
             return False
-        return datetime.utcnow() < self.trial_expires_at
+        return datetime.now(timezone.utc) < self.trial_expires_at
     
     @property
     def is_premium_active(self) -> bool:
         """Активна ли Premium подписка"""
         if not self.is_premium or not self.premium_expires_at:
             return False
-        return datetime.utcnow() < self.premium_expires_at
+        return datetime.now(timezone.utc) < self.premium_expires_at
     
     @property
     def is_premium_expired(self) -> bool:
@@ -373,7 +387,7 @@ class User(BaseModel, SoftDeleteMixin):
     @property
     def can_download(self) -> bool:
         """Может ли пользователь скачивать файлы"""
-        return not self.is_banned and not self.is_deleted and not self.is_temp_banned
+        return self.is_active and not self.is_banned and not self.is_deleted and not self.is_temp_banned
     
     @property
     def needs_subscription_check(self) -> bool:
@@ -430,7 +444,7 @@ class User(BaseModel, SoftDeleteMixin):
     def reset_daily_downloads(self):
         """Сбросить дневной счетчик скачиваний"""
         self.downloads_today = 0
-        self.last_download_reset = datetime.utcnow()
+        self.last_download_reset = datetime.now(timezone.utc)
     
     def increment_downloads(self, count: int = 1):
         """Увеличить счетчик скачиваний"""
@@ -445,7 +459,7 @@ class User(BaseModel, SoftDeleteMixin):
         if self.trial_used:
             raise ValueError("Trial period already used")
             
-        self.trial_started_at = datetime.utcnow()
+        self.trial_started_at = datetime.now(timezone.utc)
         self.trial_expires_at = self.trial_started_at + timedelta(minutes=duration_minutes)
         self.trial_used = True
         self.user_type = UserType.TRIAL
@@ -489,7 +503,7 @@ class User(BaseModel, SoftDeleteMixin):
     
     def update_activity(self):
         """Обновить время последней активности"""
-        self.last_active_at = datetime.utcnow()
+        self.last_active_at = datetime.now(timezone.utc)
     
     def add_subscription_check(self, channels: List[str]):
         """Добавить результат проверки подписок"""

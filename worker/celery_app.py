@@ -13,6 +13,8 @@ import time
 from pathlib import Path
 from datetime import timedelta
 
+from shared.config.settings import settings
+
 # Добавляем пути для импорта
 project_root = Path(__file__).parent.parent
 sys.path.insert(0, str(project_root))
@@ -43,24 +45,30 @@ def create_celery_app(app_name: str = 'videobot_worker', **kwargs) -> Celery:
     """
     broker_url = kwargs.get('broker_url', settings.CELERY_BROKER_URL)
     result_backend = kwargs.get('result_backend', settings.CELERY_RESULT_BACKEND)
-    
+
     app = Celery(
-        app_name,
-        broker=broker_url,
-        backend=result_backend,
+        "videobot",
+        broker=settings.CELERY_BROKER_URL,
+        backend=settings.CELERY_RESULT_BACKEND,
         include=[
-            'tasks.download_tasks',
-            'tasks.batch_tasks',
-            'tasks.cleanup_tasks',
-            'tasks.analytics_tasks',
-            'tasks.notification_tasks',
+            'worker.tasks.download_tasks',
+            'worker.tasks.batch_tasks',
+            'worker.tasks.cleanup_tasks',
+            'worker.tasks.analytics_tasks',
+            'worker.tasks.notification_tasks',
         ]
     )
-    
-    # Применяем конфигурацию
-    app.conf.update(get_celery_config(**kwargs))
-    
+
+    app.autodiscover_tasks([
+        'worker.tasks'
+    ])
+
     return app
+
+    # Применяем конфигурацию
+    # app.conf.update(get_celery_config(**kwargs))
+    #
+    # return app
 
 def get_celery_config(**kwargs) -> dict:
     """

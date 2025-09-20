@@ -577,7 +577,7 @@ class DailyStats(BaseModel):
 
 # Утилитарные функции для аналитики
 
-def track_user_event(event_type: str, user_id: int, telegram_user_id: int,
+async def track_user_event(event_type: str, user_id: int, telegram_user_id: int,
                     user_type: str = None, **kwargs):
     """Отследить событие пользователя"""
     return AnalyticsEvent.track_event(
@@ -588,7 +588,7 @@ def track_user_event(event_type: str, user_id: int, telegram_user_id: int,
         **kwargs
     )
 
-def track_download_event(event_type: str, user_id: int, platform: str,
+async def track_download_event(event_type: str, user_id: int, platform: str,
                         file_size_mb: float = None, duration_seconds: int = None,
                         **kwargs):
     """Отследить событие скачивания"""
@@ -601,7 +601,7 @@ def track_download_event(event_type: str, user_id: int, platform: str,
         **kwargs
     )
 
-def track_payment_event(event_type: str, user_id: int, payment_amount: float,
+async def track_payment_event(event_type: str, user_id: int, payment_amount: float,
                        payment_method: str = None, **kwargs):
     """Отследить событие платежа"""
     return AnalyticsEvent.track_event(
@@ -613,7 +613,7 @@ def track_payment_event(event_type: str, user_id: int, payment_amount: float,
     )
 
 
-def track_system_event(event_type: str, event_data: Dict[str, Any] = None,
+async def track_system_event(event_type: str, event_data: Dict[str, Any] = None,
                        error_message: str = None, duration_seconds: int = None,
                        **kwargs):
     """Отследить системное событие"""
