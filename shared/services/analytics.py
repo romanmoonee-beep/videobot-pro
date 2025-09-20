@@ -9,6 +9,7 @@ from datetime import datetime, timedelta, date
 from typing import Dict, Any, List, Optional, Union
 from collections import defaultdict, deque
 import json
+from sqlalchemy import text
 
 from shared.models import (
     AnalyticsEvent, DailyStats, EventType, User, DownloadTask, 
@@ -446,7 +447,7 @@ class AnalyticsService:
                     ORDER BY total_downloads DESC
                 """
                 
-                result = await session.execute(downloads_query, {"start_date": start_date})
+                result = await session.execute(text(downloads_query), {"start_date": start_date})
                 platforms_data = []
                 
                 for row in result.fetchall():
@@ -695,18 +696,21 @@ class AnalyticsService:
     async def _aggregate_user_metrics(self, session, daily_stats: DailyStats, target_date: date):
         """Агрегировать метрики пользователей"""
         # Новые пользователи
-        new_users_query = """
-            SELECT COUNT(*) FROM users 
-            WHERE DATE(created_at) = :target_date
-        """
+        new_users_query = text(
+            """
+                SELECT COUNT(*) FROM users 
+                WHERE DATE(created_at) = :target_date
+            """
+        )
+
         result = await session.execute(new_users_query, {"target_date": target_date})
         daily_stats.new_users = result.scalar()
         
         # Активные пользователи
-        active_users_query = """
+        active_users_query = text("""
             SELECT COUNT(DISTINCT user_id) FROM analytics_events 
             WHERE DATE(created_at) = :target_date
-        """
+        """)
         result = await session.execute(active_users_query, {"target_date": target_date})
         daily_stats.active_users = result.scalar()
         
@@ -716,7 +720,7 @@ class AnalyticsService:
             WHERE DATE(created_at) = :target_date 
             AND event_type = 'user_trial_started'
         """
-        result = await session.execute(trial_users_query, {"target_date": target_date})
+        result = await session.execute(text(trial_users_query), {"target_date": target_date})
         daily_stats.trial_users_started = result.scalar()
         
         # Premium покупки
@@ -725,7 +729,7 @@ class AnalyticsService:
             WHERE DATE(created_at) = :target_date 
             AND event_type = 'user_premium_purchased'
         """
-        result = await session.execute(premium_query, {"target_date": target_date})
+        result = await session.execute(text(premium_query), {"target_date": target_date})
         daily_stats.premium_purchases = result.scalar()
     
     async def _aggregate_download_metrics(self, session, daily_stats: DailyStats, target_date: date):
@@ -742,7 +746,7 @@ class AnalyticsService:
             FROM download_tasks 
             WHERE DATE(created_at) = :target_date
         """
-        result = await session.execute(downloads_query, {"target_date": target_date})
+        result = await session.execute(text(downloads_query), {"target_date": target_date})
         row = result.fetchone()
         
         daily_stats.total_downloads = row.total
@@ -763,7 +767,7 @@ class AnalyticsService:
             FROM payments 
             WHERE DATE(created_at) = :target_date
         """
-        result = await session.execute(payments_query, {"target_date": target_date})
+        result = await session.execute(text(payments_query), {"target_date": target_date})
         row = result.fetchone()
         
         daily_stats.total_payments = row.total

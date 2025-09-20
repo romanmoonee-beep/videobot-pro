@@ -250,7 +250,7 @@ async def process_small_batch(message: Message, urls: List[str], user: User):
         "\n".join(preview_lines),
         reply_markup=keyboard
     )
-    
+
     # Сохраняем данные в состояние
     await message.bot.session.set(f"batch_urls_{message.from_user.id}", {
         "urls": valid_urls,
@@ -337,7 +337,9 @@ async def handle_batch_callbacks(callback: CallbackQuery, state: FSMContext):
         elif action == "cancel":
             await handle_cancel_batch(callback, state)
         elif action.startswith("confirm"):
-            await handle_confirm_batch(callback, state)
+            # EDIT:
+            # await handle_confirm_batch(callback, state)
+            pass
         else:
             await callback.answer("Неизвестная команда")
     

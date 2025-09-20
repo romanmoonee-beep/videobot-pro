@@ -8,8 +8,12 @@ import validators
 from typing import Optional, List, Dict, Any, Tuple, Union
 from urllib.parse import urlparse, parse_qs
 from datetime import datetime
-import phonenumbers
-from phonenumbers import NumberParseException
+try:
+    import phonenumbers
+    from phonenumbers import NumberParseException
+    PHONENUMBERS_AVAILABLE = True
+except ImportError:
+    PHONENUMBERS_AVAILABLE = False
 import structlog
 
 logger = structlog.get_logger(__name__)
@@ -126,6 +130,9 @@ def validate_phone(phone: str, region: str = None) -> bool:
     Returns:
         True если номер валидный
     """
+    if not PHONENUMBERS_AVAILABLE:
+        return bool(re.match(r'^\+?[\d\s\-\(\)]+$', phone))
+
     if not phone or not isinstance(phone, str):
         return False
     

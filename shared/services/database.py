@@ -37,6 +37,7 @@ class DatabaseService:
         self.query_count = 0
         self.error_count = 0
         self.last_health_check = None
+        self.db_config = db_config
         
     async def initialize(self):
         """Инициализация сервиса базы данных"""
@@ -47,7 +48,7 @@ class DatabaseService:
             logger.info("Initializing database service...")
             
             # Используем конфигурацию из db_config
-            await db_config.initialize()
+            await self.db_config.initialize()
             
             self.engine = db_config.async_engine
             self.sync_engine = db_config.sync_engine

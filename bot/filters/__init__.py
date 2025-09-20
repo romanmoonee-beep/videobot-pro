@@ -39,22 +39,22 @@ from .premium_filter import (
     SubscriptionRequiredFilter,
     BannedUserFilter,
     PremiumFeatureFilter,
-    DownloadPermissionFilter,
+    # DownloadPermissionFilter,
     
     # Предопределенные экземпляры
-    is_premium,
-    is_trial,
-    is_free,
-    subscription_required,
-    not_banned,
-    download_allowed,
-    
-    # Фабричные функции
-    user_type,
-    limit_check,
-    premium_feature,
-    download_permission,
-    banned_only
+    # is_premium,
+    # is_trial,
+    # is_free,
+    # subscription_required,
+    # not_banned,
+    # download_allowed,
+    #
+    # # Фабричные функции
+    # user_type,
+    # limit_check,
+    # premium_feature,
+    # download_permission,
+    # banned_only
 )
 
 # URL Filters
@@ -131,9 +131,9 @@ class DownloadFilter(BaseFilter):
             return False
         
         # Проверяем разрешения
-        permission_result = await download_allowed(message)
-        if not permission_result:
-            return False
+        # permission_result = await download_allowed(message)
+        # if not permission_result:
+        #     return False
         
         # Проверяем rate limits
         rate_result = await download_rate_limit(message)
@@ -150,8 +150,8 @@ class DownloadFilter(BaseFilter):
         }
         
         # Добавляем данные о пользователе если есть
-        if isinstance(permission_result, dict):
-            combined_result.update(permission_result)
+        # if isinstance(permission_result, dict):
+        #     combined_result.update(permission_result)
         
         return combined_result
 
@@ -191,15 +191,15 @@ class BatchDownloadFilter(BaseFilter):
         
         # Проверяем разрешения (для не-админов)
         admin_result = await is_admin(message)
-        if not admin_result:
-            permission_result = await download_permission(subscriptions=True, limits=True)(message)
-            if not permission_result:
-                return False
+        # if not admin_result:
+            # permission_result = await download_permission(subscriptions=True, limits=True)(message)
+            # if not permission_result:
+            #     return False
             
             # Проверяем Premium функцию batch архива
-            batch_feature_result = await premium_feature('batch_archive')(message)
-            if not batch_feature_result:
-                return False
+#             batch_feature_result = await premium_feature('batch_archive')(message)
+#             if not batch_feature_result:
+#                 return False
         
         return {
             'batch_download_allowed': True,
@@ -225,9 +225,9 @@ class CallbackFilter(BaseFilter):
             return False
         
         # Проверяем не забанен ли пользователь
-        ban_result = await not_banned(callback)
-        if not ban_result:
-            return False
+        # ban_result = await not_banned(callback)
+        # if not ban_result:
+        #     return False
         
         return {
             'callback_allowed': True,
@@ -253,11 +253,12 @@ __all__ = [
     # Premium/User Type фильтры
     'PremiumFilter', 'TrialFilter', 'FreeUserFilter', 'UserTypeFilter',
     'LimitCheckFilter', 'SubscriptionRequiredFilter', 'BannedUserFilter',
-    'PremiumFeatureFilter', 'DownloadPermissionFilter',
-    'is_premium', 'is_trial', 'is_free', 'subscription_required', 
-    'not_banned', 'download_allowed',
-    'user_type', 'limit_check', 'premium_feature', 'download_permission', 'banned_only',
-    
+    'PremiumFeatureFilter',
+    # 'DownloadPermissionFilter',
+    # 'is_premium', 'is_trial', 'is_free', 'subscription_required',
+    # 'not_banned', 'download_allowed',
+    # 'user_type', 'limit_check', 'premium_feature', 'download_permission', 'banned_only',
+
     # URL фильтры
     'URLFilter', 'PlatformFilter', 'BatchFilter', 'SingleURLFilter',
     'YouTubeFilter', 'TikTokFilter', 'InstagramFilter', 'ShortsFilter',
@@ -282,6 +283,6 @@ __all__ = [
 # Полезные комбинации фильтров для импорта
 DOWNLOAD_FILTERS = [can_download, admin_can_download, can_batch_download]
 ADMIN_FILTERS = [is_admin, is_super_admin, is_owner]
-USER_TYPE_FILTERS = [is_premium, is_trial, is_free]
+# USER_TYPE_FILTERS = [is_premium, is_trial, is_free]
 RATE_LIMIT_FILTERS = [main_rate_limit, download_rate_limit, spam_filter]
 URL_FILTERS = [has_url, has_batch_urls, has_single_url]

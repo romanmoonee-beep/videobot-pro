@@ -10,34 +10,23 @@ import structlog
 import os
 import sys
 import time
+from pathlib import Path
 from datetime import timedelta
 
 # Добавляем пути для импорта
-sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+project_root = Path(__file__).parent.parent
+sys.path.insert(0, str(project_root))
 
 try:
     from shared.config.settings import settings
     from worker.config import worker_config
 except ImportError as e:
     print(f"Warning: Could not import settings: {e}")
-    # Fallback значения
+    # Создаем fallback настройки
     class FallbackSettings:
-        CELERY_BROKER_URL = "redis://localhost:6379/0"
-        CELERY_RESULT_BACKEND = "redis://localhost:6379/0"
-    
-    class FallbackWorkerConfig:
-        soft_timeout = 1500
-        task_timeout = 1800
-        prefetch_multiplier = 1
-        max_tasks_per_child = 1000
-        max_memory_per_child = 200
-        worker_name = "videobot-worker"
-        worker_concurrency = 4
-        worker_pool = "prefork"
-        temp_dir = "/tmp/videobot"
-    
+        CELERY_BROKER_URL = os.getenv('CELERY_BROKER_URL', 'redis://localhost:6379/0')
+        CELERY_RESULT_BACKEND = os.getenv('CELERY_RESULT_BACKEND', 'redis://localhost:6379/0')
     settings = FallbackSettings()
-    worker_config = FallbackWorkerConfig()
 
 logger = structlog.get_logger(__name__)
 
@@ -60,11 +49,11 @@ def create_celery_app(app_name: str = 'videobot_worker', **kwargs) -> Celery:
         broker=broker_url,
         backend=result_backend,
         include=[
-            'worker.tasks.download_tasks',
-            'worker.tasks.batch_tasks', 
-            'worker.tasks.cleanup_tasks',
-            'worker.tasks.analytics_tasks',
-            'worker.tasks.notification_tasks',
+            'tasks.download_tasks',
+            'tasks.batch_tasks',
+            'tasks.cleanup_tasks',
+            'tasks.analytics_tasks',
+            'tasks.notification_tasks',
         ]
     )
     

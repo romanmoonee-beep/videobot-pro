@@ -9,7 +9,10 @@ class BaseSchema(BaseModel):
         from_attributes=True,
         validate_assignment=True,
         arbitrary_types_allowed=True,
-        use_enum_values=True
+        use_enum_values=True,
+        str_strip_whitespace=True,
+        validate_default=True,
+        extra='forbid'
     )
 
 

@@ -21,7 +21,7 @@ from bot.utils.url_extractor import (
     normalize_url
 )
 from bot.config import bot_config
-from worker.tasks.download_tasks import process_single_download
+from worker.tasks.__init__ import process_single_download
 
 logger = structlog.get_logger(__name__)
 

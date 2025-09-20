@@ -241,11 +241,11 @@ class AnalyticsEvent(BaseModel):
     
     # Relationships
     user = relationship("User", back_populates="analytics_events")
-    admin_user = relationship("AdminUser")
-    download_task = relationship("DownloadTask")
-    download_batch = relationship("DownloadBatch")
-    payment = relationship("Payment")
-    broadcast = relationship("BroadcastMessage")
+    admin_user = relationship("AdminUser", foreign_keys=[admin_user_id])
+    download_task = relationship("DownloadTask", foreign_keys=[download_task_id])
+    download_batch = relationship("DownloadBatch", foreign_keys=[download_batch_id])
+    payment = relationship("Payment", foreign_keys=[payment_id])
+    broadcast = relationship("BroadcastMessage", foreign_keys=[broadcast_id])
     
     # Constraints и индексы
     __table_args__ = (

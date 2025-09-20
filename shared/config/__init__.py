@@ -17,11 +17,14 @@ from .database import (
 
 # ИСПРАВЛЕНО: делаем импорты опциональными чтобы избежать ошибок
 try:
-    from .redis import init_redis, close_redis, redis
+    from .redis import init_redis, close_redis
+    REDIS_AVAILABLE = True
 except ImportError:
-    init_redis = None
-    close_redis = None
-    redis = None
+    def init_redis():
+        return None
+    def close_redis():
+        return None
+    REDIS_AVAILABLE = False
 
 try:
     from .storage import (

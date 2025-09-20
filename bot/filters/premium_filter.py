@@ -8,6 +8,8 @@ from datetime import datetime
 from aiogram import types
 from aiogram.filters import BaseFilter
 
+from sqlalchemy import text
+
 from shared.config.database import get_async_session
 from shared.models import User
 from bot.config import bot_config
@@ -320,26 +322,32 @@ class PremiumFeatureFilter(BaseFilter):
             'no_subscriptions': 'premium',
             'priority_queue': 'premium'
         }
-    
+
     async def __call__(self, message: types.Message) -> Union[bool, dict]:
-        """Проверка доступности Premium функции"""
         if not message.from_user:
             return False
-        
+
         user_id = message.from_user.id
-        
-        # Функция не требует Premium
+
         if self.feature not in self.premium_features:
             return True
-        
+
         try:
             async with get_async_session() as session:
-                user = await session.get(User, user_id)
-                
-                if not user:
+                result = await session.execute(
+                    text("SELECT * FROM users WHERE telegram_id = :user_id"),
+                    {'user_id': user_id}
+                )
+                user = result.first()
+
+                if not user or not user.is_premium_active:
                     return False
-                
-                required_type = self.premium_features[self.feature]
-                user_type = user.current_user_type
-                
-                # Проверяем доступ
+
+                return {
+                    'user_id': user_id,
+                    'feature_available': True,
+                    'user_type': user.current_user_type
+                }
+        except Exception:
+            return False
+

@@ -15,7 +15,7 @@ from aiogram.fsm.context import FSMContext
 from shared.config.database import get_async_session
 from shared.models import User, RequiredChannel, EventType
 from shared.models.analytics import track_user_event
-from bot.config import bot_config, get_message, MessageType
+from bot.config import bot_config, get_message, MessageType, settings
 from bot.utils.user_manager import get_or_create_user, update_user_activity
 from bot.utils.subscription_checker import check_required_subscriptions
 from bot.keyboards.inline import create_main_menu_keyboard, create_trial_keyboard
@@ -42,7 +42,7 @@ async def start_command(message: Message, state: FSMContext):
         # Получаем или создаем пользователя
         async with get_async_session() as session:
             user = await get_or_create_user(
-                session=session,
+                session,
                 telegram_id=user_id,
                 username=message.from_user.username,
                 first_name=message.from_user.first_name,

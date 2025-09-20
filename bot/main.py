@@ -151,7 +151,8 @@ class BotApplication:
         
         # Создание web приложения
         self.web_app = web.Application()
-        
+        setup_application(self.web_app, self.dp, bot=self.bot)
+
         # Настройка webhook handler
         SimpleRequestHandler(
             dispatcher=self.dp,

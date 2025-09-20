@@ -18,8 +18,21 @@ from .base import BaseProcessor
 from .video_processor import VideoProcessor
 from .thumbnail_generator import ThumbnailGenerator
 from .quality_optimizer import QualityOptimizer
-from ..utils.progress_tracker import ProgressTracker
-from ..utils.file_manager import FileManager
+
+try:
+    from ..utils.progress_tracker import ProgressTracker
+    from ..utils.file_manager import FileManager
+except ImportError:
+    class ProgressTracker:
+        def start(self, task_id, total_steps): pass
+
+        def update(self, task_id, message): pass
+
+        def complete(self, task_id): pass
+
+
+    class FileManager:
+        def get_file_info(self, path): return {}
 
 logger = structlog.get_logger(__name__)
 

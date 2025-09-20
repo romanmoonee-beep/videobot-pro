@@ -13,7 +13,11 @@ from urllib.parse import urlparse, parse_qs, urlencode
 from functools import wraps
 import asyncio
 import time
-import pytz
+try:
+    import pytz
+    PYTZ_AVAILABLE = True
+except ImportError:
+    PYTZ_AVAILABLE = False
 import structlog
 
 logger = structlog.get_logger(__name__)
@@ -502,6 +506,8 @@ class TimezoneHelper:
         Returns:
             Объект временной зоны
         """
+        if not PYTZ_AVAILABLE:
+            return None
         try:
             return pytz.timezone(timezone_name)
         except pytz.UnknownTimeZoneError:

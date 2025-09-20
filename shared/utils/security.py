@@ -19,6 +19,12 @@ import structlog
 
 from ..config.settings import settings
 
+try:
+    import bcrypt
+    BCRYPT_AVAILABLE = True
+except ImportError:
+    BCRYPT_AVAILABLE = False
+
 logger = structlog.get_logger(__name__)
 
 class SecurityError(Exception):
@@ -39,7 +45,6 @@ def hash_password(password: str) -> str:
     Returns:
         Хешированный пароль
     """
-    import bcrypt
     
     salt = bcrypt.gensalt()
     hashed = bcrypt.hashpw(password.encode('utf-8'), salt)
@@ -56,7 +61,6 @@ def verify_password(password: str, hashed: str) -> bool:
     Returns:
         True если пароль правильный
     """
-    import bcrypt
     
     try:
         return bcrypt.checkpw(password.encode('utf-8'), hashed.encode('utf-8'))

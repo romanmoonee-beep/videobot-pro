@@ -51,17 +51,16 @@ class WorkerConfig:
             Path(self.local_storage_path).mkdir(parents=True, exist_ok=True)
         except Exception as e:
             logger.warning(f"Could not create worker directories: {e}")
-    
+
     @property
     def LOCAL_STORAGE_PATH(self) -> str:
-        """Свойство для совместимости с существующим кодом"""
+        """Свойство для совместимости"""
         return self.local_storage_path
-    
+
     @property
     def MAX_FILE_SIZE_MB(self) -> int:
-        """Свойство для совместимости с существующим кодом"""
+        """Свойство для совместимости"""
         return self.max_file_size_mb
-
 # Создаем глобальный экземпляр конфигурации
 worker_config = WorkerConfig()
 

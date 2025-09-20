@@ -8,6 +8,7 @@ import asyncio
 from datetime import datetime, timedelta, date
 from typing import Dict, Any, List, Optional
 from celery import current_task
+from sqlalchemy import text
 
 from worker.celery_app import celery_app
 from worker.tasks.base import async_task_wrapper
@@ -41,12 +42,12 @@ async def _process_analytics_events_async(batch_size: int):
         async with get_async_session() as session:
             # Получаем необработанные события
             result = await session.execute(
-                """
+                text("""
                 SELECT * FROM analytics_events 
                 WHERE is_processed = false 
                 ORDER BY created_at ASC 
                 LIMIT :batch_size
-                """,
+                """),
                 {'batch_size': batch_size}
             )
             events = result.fetchall()
@@ -64,11 +65,11 @@ async def _process_analytics_events_async(batch_size: int):
                     
                     # Помечаем как обработанное
                     await session.execute(
-                        """
+                        text("""
                         UPDATE analytics_events 
                         SET is_processed = true, processed_at = :now 
                         WHERE id = :event_id
-                        """,
+                        """),
                         {'now': datetime.utcnow(), 'event_id': event.id}
                     )
                     
@@ -93,7 +94,7 @@ async def _update_daily_stats(session, event):
     
     # Получаем или создаем запись статистики за день
     daily_stats = await session.execute(
-        "SELECT * FROM daily_stats WHERE stats_date = :date",
+        text("SELECT * FROM daily_stats WHERE stats_date = :date"),
         {'date': event_date}
     )
     stats = daily_stats.fetchone()
@@ -101,10 +102,10 @@ async def _update_daily_stats(session, event):
     if not stats:
         # Создаем новую запись
         await session.execute(
-            """
+            text("""
             INSERT INTO daily_stats (stats_date, new_users, total_downloads) 
             VALUES (:date, 0, 0)
-            """,
+            """),
             {'date': event_date}
         )
         await session.flush()
@@ -144,34 +145,34 @@ async def _calculate_daily_stats_async(target_date: str = None):
             
             # Новые пользователи
             new_users = await session.execute(
-                """
+                text("""
                 SELECT COUNT(*) FROM users 
                 WHERE DATE(created_at) = :date
-                """,
+                """),
                 {'date': calc_date}
             )
             stats['new_users'] = new_users.scalar() or 0
             
             # Активные пользователи
             active_users = await session.execute(
-                """
+                text("""
                 SELECT COUNT(DISTINCT user_id) FROM analytics_events 
                 WHERE DATE(created_at) = :date
-                """,
+                """),
                 {'date': calc_date}
             )
             stats['active_users'] = active_users.scalar() or 0
             
             # Скачивания
             downloads = await session.execute(
-                """
+                text("""
                 SELECT 
                     COUNT(*) as total,
                     COUNT(CASE WHEN status = 'completed' THEN 1 END) as successful,
                     COUNT(CASE WHEN status = 'failed' THEN 1 END) as failed
                 FROM download_tasks 
                 WHERE DATE(created_at) = :date
-                """,
+                """),
                 {'date': calc_date}
             )
             download_stats = downloads.fetchone()
@@ -184,13 +185,13 @@ async def _calculate_daily_stats_async(target_date: str = None):
             
             # Обновляем или создаем запись
             existing = await session.execute(
-                "SELECT id FROM daily_stats WHERE stats_date = :date",
+                text("SELECT id FROM daily_stats WHERE stats_date = :date"),
                 {'date': calc_date}
             )
             
             if existing.fetchone():
                 # Обновляем существующую
-                await session.execute("""
+                await session.execute(text("""
                     UPDATE daily_stats 
                     SET new_users = :new_users,
                         active_users = :active_users,
@@ -198,15 +199,15 @@ async def _calculate_daily_stats_async(target_date: str = None):
                         successful_downloads = :successful_downloads,
                         failed_downloads = :failed_downloads
                     WHERE stats_date = :stats_date
-                """, {**stats, 'stats_date': calc_date})
+                """), {**stats, 'stats_date': calc_date})
             else:
                 # Создаем новую
-                await session.execute("""
+                await session.execute(text("""
                     INSERT INTO daily_stats (stats_date, new_users, active_users, 
                                            total_downloads, successful_downloads, failed_downloads) 
                     VALUES (:stats_date, :new_users, :active_users, 
                            :total_downloads, :successful_downloads, :failed_downloads)
-                """, {**stats, 'stats_date': calc_date})
+                """), {**stats, 'stats_date': calc_date})
             
             await session.commit()
             
@@ -246,11 +247,11 @@ async def _cleanup_old_events_async(days_old: int):
         async with get_async_session() as session:
             # Удаляем старые обработанные события
             result = await session.execute(
-                """
+                text("""
                 DELETE FROM analytics_events 
                 WHERE created_at < :cutoff_date 
                 AND is_processed = true
-                """,
+                """),
                 {'cutoff_date': cutoff_date}
             )
             
@@ -294,7 +295,7 @@ async def _generate_user_report_async(user_id: int, days: int):
         async with get_async_session() as session:
             # Основная информация о пользователе
             user_info = await session.execute(
-                "SELECT * FROM users WHERE id = :user_id",
+                text("SELECT * FROM users WHERE id = :user_id"),
                 {'user_id': user_id}
             )
             user = user_info.fetchone()
@@ -304,20 +305,20 @@ async def _generate_user_report_async(user_id: int, days: int):
             
             # События пользователя
             events = await session.execute(
-                """
+                text("""
                 SELECT event_type, COUNT(*) as count
                 FROM analytics_events 
                 WHERE user_id = :user_id 
                 AND created_at >= :start_date
                 GROUP BY event_type
                 ORDER BY count DESC
-                """,
+                """),
                 {'user_id': user_id, 'start_date': start_date}
             )
             
             # Загрузки пользователя
             downloads = await session.execute(
-                """
+                text("""
                 SELECT 
                     platform,
                     status,
@@ -326,7 +327,7 @@ async def _generate_user_report_async(user_id: int, days: int):
                 WHERE user_id = :user_id 
                 AND created_at >= :start_date
                 GROUP BY platform, status
-                """,
+                """),
                 {'user_id': user_id, 'start_date': start_date}
             )
             
@@ -387,21 +388,21 @@ async def _update_activity_stats_async():
             today = datetime.utcnow().date()
             
             active_count = await session.execute(
-                """
+                text("""
                 SELECT COUNT(DISTINCT user_id) 
                 FROM analytics_events 
                 WHERE DATE(created_at) = :today
-                """,
+                """),
                 {'today': today}
             )
             
             # Обновляем в daily_stats
             await session.execute(
-                """
+                text("""
                 UPDATE daily_stats 
                 SET active_users = :count 
                 WHERE stats_date = :today
-                """,
+                """),
                 {'count': active_count.scalar() or 0, 'today': today}
             )
             

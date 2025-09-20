@@ -10,7 +10,7 @@ from typing import Dict, Any, List, Optional
 from sqlalchemy import text
 from sqlalchemy.exc import SQLAlchemyError
 
-from .database import get_async_session, engine
+from .database import get_async_session, db_config
 from .settings import settings
 
 logger = structlog.get_logger(__name__)

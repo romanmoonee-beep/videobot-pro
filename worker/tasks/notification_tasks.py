@@ -8,6 +8,7 @@ import asyncio
 from datetime import datetime, timedelta
 from typing import Dict, Any, List, Optional
 from celery import current_task
+from sqlalchemy import text
 
 from worker.celery_app import celery_app
 from worker.tasks.base import async_task_wrapper
@@ -41,12 +42,12 @@ async def _send_download_notification_async(task_id: int):
         async with get_async_session() as session:
             # Получаем информацию о задаче
             task_result = await session.execute(
-                """
+                text("""
                 SELECT dt.*, u.telegram_id, u.notification_settings
                 FROM download_tasks dt
                 JOIN users u ON dt.user_id = u.id
                 WHERE dt.id = :task_id
-                """,
+                """),
                 {'task_id': task_id}
             )
             task_data = task_result.fetchone()
@@ -71,7 +72,7 @@ async def _send_download_notification_async(task_id: int):
             
             # Обновляем флаг уведомления
             await session.execute(
-                "UPDATE download_tasks SET notification_sent = true WHERE id = :task_id",
+                text("UPDATE download_tasks SET notification_sent = true WHERE id = :task_id"),
                 {'task_id': task_id}
             )
             await session.commit()
@@ -182,12 +183,12 @@ async def _send_batch_notification_async(batch_id: int):
         async with get_async_session() as session:
             # Получаем информацию о batch
             batch_result = await session.execute(
-                """
+                text("""
                 SELECT db.*, u.telegram_id, u.notification_settings
                 FROM download_batches db
                 JOIN users u ON db.user_id = u.id
                 WHERE db.id = :batch_id
-                """,
+                """),
                 {'batch_id': batch_id}
             )
             batch_data = batch_result.fetchone()
@@ -203,14 +204,14 @@ async def _send_batch_notification_async(batch_id: int):
             
             # Получаем статистику задач в batch
             tasks_stats = await session.execute(
-                """
+                text("""
                 SELECT 
                     COUNT(*) as total,
                     COUNT(CASE WHEN status = 'completed' THEN 1 END) as completed,
                     COUNT(CASE WHEN status = 'failed' THEN 1 END) as failed
                 FROM download_tasks 
                 WHERE batch_id = :batch_id
-                """,
+                """),
                 {'batch_id': batch_id}
             )
             stats = tasks_stats.fetchone()
@@ -223,7 +224,7 @@ async def _send_batch_notification_async(batch_id: int):
             
             # Обновляем флаг уведомления
             await session.execute(
-                "UPDATE download_batches SET notification_sent = true WHERE id = :batch_id",
+                text("UPDATE download_batches SET notification_sent = true WHERE id = :batch_id"),
                 {'batch_id': batch_id}
             )
             await session.commit()
@@ -288,7 +289,7 @@ async def _send_premium_warning_async(user_id: int, days_remaining: int):
         
         async with get_async_session() as session:
             user_result = await session.execute(
-                "SELECT * FROM users WHERE id = :user_id",
+                text("SELECT * FROM users WHERE id = :user_id"),
                 {'user_id': user_id}
             )
             user = user_result.fetchone()
@@ -365,7 +366,7 @@ async def _send_broadcast_async(broadcast_id: int, user_ids: List[int], test_mod
         async with get_async_session() as session:
             # Получаем рассылку
             broadcast_result = await session.execute(
-                "SELECT * FROM broadcast_messages WHERE id = :broadcast_id",
+                text("SELECT * FROM broadcast_messages WHERE id = :broadcast_id"),
                 {'broadcast_id': broadcast_id}
             )
             broadcast = broadcast_result.fetchone()
@@ -388,11 +389,11 @@ async def _send_broadcast_async(broadcast_id: int, user_ids: List[int], test_mod
             
             # Обновляем статус рассылки
             await session.execute(
-                """
+                text("""
                 UPDATE broadcast_messages 
                 SET status = 'sending', started_at = :now, total_recipients = :total
                 WHERE id = :broadcast_id
-                """,
+                """),
                 {
                     'now': datetime.utcnow(),
                     'total': len(target_users),
@@ -410,12 +411,12 @@ async def _send_broadcast_async(broadcast_id: int, user_ids: List[int], test_mod
             
             # Обновляем статистику рассылки
             await session.execute(
-                """
+                text("""
                 UPDATE broadcast_messages 
                 SET status = 'completed', completed_at = :now,
                     sent_count = :sent, failed_count = :failed, blocked_count = :blocked
                 WHERE id = :broadcast_id
-                """,
+                """),
                 {
                     'now': datetime.utcnow(),
                     'sent': sent_count,
@@ -442,11 +443,11 @@ async def _send_broadcast_async(broadcast_id: int, user_ids: List[int], test_mod
 async def _get_broadcast_target_users(session, broadcast) -> List[int]:
     """Получить список пользователей для рассылки"""
     try:
-        result = await session.execute("""
+        result = await session.execute(text("""
             SELECT telegram_id FROM users 
             WHERE is_deleted = false AND is_banned = false
             LIMIT 100
-        """)
+        """))
         
         return [row[0] for row in result.fetchall()]
     except Exception as e:
@@ -481,12 +482,12 @@ async def _check_premium_expiry_async():
                 target_date = datetime.utcnow() + timedelta(days=days)
                 
                 users_result = await session.execute(
-                    """
+                    text("""
                     SELECT id, telegram_id, premium_expires_at 
                     FROM users 
                     WHERE is_premium = true 
                     AND DATE(premium_expires_at) = :target_date
-                    """,
+                    """),
                     {'target_date': target_date.date()}
                 )
                 

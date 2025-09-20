@@ -4,6 +4,7 @@ VideoBot Pro - Quality Optimizer
 """
 
 import os
+import re
 import tempfile
 import asyncio
 import structlog

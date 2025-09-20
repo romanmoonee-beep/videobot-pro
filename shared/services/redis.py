@@ -47,7 +47,7 @@ class RedisService:
             )
             await self.client.ping()
 
-            self.pubsub = self.client.pubsub()
+            self._pubsub = None
             self._initialized = True
             self._health_status = True
             logger.info("Redis service initialized successfully")

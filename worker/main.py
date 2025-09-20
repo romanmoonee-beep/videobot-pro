@@ -9,8 +9,8 @@ import signal
 from typing import Optional
 import structlog
 
-from celery_app import celery_app, create_celery_app, validate_celery_config
-from worker.config import worker_config
+from .celery_app import celery_app, validate_celery_config
+from .config import worker_config
 from shared.config.database import init_database, close_database
 from shared.config.redis import init_redis, close_redis
 

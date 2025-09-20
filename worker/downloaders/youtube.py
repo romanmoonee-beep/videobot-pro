@@ -4,6 +4,7 @@ VideoBot Pro - YouTube Downloader
 """
 
 import re
+import os
 import asyncio
 from typing import Optional, List, Callable
 from urllib.parse import urlparse, parse_qs

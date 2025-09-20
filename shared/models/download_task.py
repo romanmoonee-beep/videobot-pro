@@ -50,7 +50,7 @@ class DownloadTask(BaseModel):
     )
     
     # Основные данные задачи
-    task_id: Mapped[str] = mapped_column(String, nullable=False)
+    task_id: Mapped[str] = mapped_column(String(100), nullable=False, index=True)
     
     original_url: Mapped[str] = mapped_column(
         Text,

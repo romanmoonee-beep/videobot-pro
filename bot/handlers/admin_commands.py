@@ -271,7 +271,11 @@ async def handle_user_search(message: Message, state: FSMContext):
             # Поиск по username
             elif search_query.startswith("@"):
                 username = search_query[1:]
-                user = await session.query(User).filter(User.username == username).first()
+                result = await session.execute(
+                    text("SELECT * FROM users WHERE username = :username"),
+                    {'username': username}
+                )
+                user = result.first()
             
             # Поиск по имени
             else:

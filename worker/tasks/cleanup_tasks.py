@@ -10,6 +10,7 @@ import asyncio
 from datetime import datetime, timedelta
 from typing import Dict, Any, Optional
 from pathlib import Path
+from sqlalchemy import text
 
 from worker.celery_app import celery_app
 from worker.tasks.base import async_task_wrapper
@@ -50,12 +51,12 @@ async def _cleanup_old_files_async(max_age_hours: int) -> Dict[str, Any]:
     
     async with get_async_session() as session:
         # Находим файлы для удаления
-        expired_files = await session.execute("""
+        expired_files = await session.execute(text("""
             SELECT id, file_name FROM download_tasks 
             WHERE created_at < :cutoff_time
             AND status = 'completed'
             LIMIT 1000
-        """, {"cutoff_time": cutoff_time})
+        """), {"cutoff_time": cutoff_time})
         
         for file_record in expired_files.fetchall():
             try:
@@ -64,11 +65,11 @@ async def _cleanup_old_files_async(max_age_hours: int) -> Dict[str, Any]:
                 total_size_freed += 1024 * 1024 * 10  # 10MB per file
                 
                 # Обновляем запись в БД
-                await session.execute("""
+                await session.execute(text("""
                     UPDATE download_tasks 
                     SET status = 'expired'
                     WHERE id = :task_id
-                """, {"task_id": file_record.id})
+                """), {"task_id": file_record.id})
                 
             except Exception as e:
                 logger.error(f"Failed to delete file", error=str(e))
@@ -160,23 +161,23 @@ async def _cleanup_cdn_links_async() -> Dict[str, Any]:
     
     async with get_async_session() as session:
         # Находим истекшие CDN ссылки
-        expired_links = await session.execute("""
+        expired_links = await session.execute(text("""
             SELECT id, cdn_url FROM download_tasks 
             WHERE created_at < NOW() - INTERVAL '24 hours'
             AND cdn_url IS NOT NULL
             AND status = 'completed'
             LIMIT 500
-        """)
+        """))
         
         for link_record in expired_links.fetchall():
             try:
                 # Обновляем запись в БД
-                await session.execute("""
+                await session.execute(text("""
                     UPDATE download_tasks 
                     SET cdn_url = NULL,
                         status = 'expired'
                     WHERE id = :task_id
-                """, {"task_id": link_record.id})
+                """), {"task_id": link_record.id})
                 
                 cleaned_count += 1
                 
@@ -214,11 +215,11 @@ async def _vacuum_database_async() -> Dict[str, Any]:
     
     async with get_async_session() as session:
         # Очищаем старые аналитические события
-        result = await session.execute("""
+        result = await session.execute(text("""
             DELETE FROM analytics_events 
             WHERE created_at < NOW() - INTERVAL '90 days'
             AND is_processed = true
-        """)
+        """))
         
         analytics_cleaned = result.rowcount
         await session.commit()
@@ -255,11 +256,11 @@ async def _cleanup_analytics_async(days_to_keep: int) -> Dict[str, Any]:
     
     async with get_async_session() as session:
         # Удаляем старые события, которые уже обработаны
-        result = await session.execute("""
+        result = await session.execute(text("""
             DELETE FROM analytics_events 
             WHERE created_at < :cutoff_date 
             AND is_processed = true
-        """, {"cutoff_date": cutoff_date})
+        """), {"cutoff_date": cutoff_date})
         
         deleted_count = result.rowcount
         await session.commit()
@@ -344,7 +345,7 @@ async def _check_database_async() -> Dict[str, Any]:
     
     try:
         async with get_async_session() as session:
-            await session.execute("SELECT 1")
+            await session.execute(text("SELECT 1"))
             
         return {"status": "healthy", "response_time": "< 100ms"}
     except Exception as e:

@@ -9,6 +9,7 @@ import structlog
 from datetime import datetime, timedelta
 from typing import Dict, Any, Optional, List
 from celery import current_task, group
+from sqlalchemy import text
 
 from worker.celery_app import celery_app
 from worker.tasks.base import async_task_wrapper
@@ -58,7 +59,7 @@ async def _process_batch_download_async(batch_id: int, request_info) -> Dict[str
         async with get_async_session() as session:
             # Получаем batch из БД
             result = await session.execute(
-                "SELECT * FROM download_batches WHERE id = :batch_id",
+                text("SELECT * FROM download_batches WHERE id = :batch_id"),
                 {"batch_id": batch_id}
             )
             batch_row = result.fetchone()
@@ -70,12 +71,12 @@ async def _process_batch_download_async(batch_id: int, request_info) -> Dict[str
             await asyncio.sleep(2)
             
             # Обновляем статус
-            await session.execute("""
+            await session.execute(text("""
                 UPDATE download_batches 
                 SET status = 'completed',
                     completed_at = :completed_at
                 WHERE id = :batch_id
-            """, {
+            """), {
                 "completed_at": datetime.utcnow(),
                 "batch_id": batch_id
             })
@@ -109,11 +110,11 @@ async def _retry_batch_async(batch_id: int) -> Dict[str, Any]:
     from shared.config.database import get_async_session
     
     async with get_async_session() as session:
-        await session.execute("""
+        await session.execute(text("""
             UPDATE download_batches 
             SET status = 'pending'
             WHERE id = :batch_id
-        """, {"batch_id": batch_id})
+        """), {"batch_id": batch_id})
         await session.commit()
     
     # Запускаем новую обработку
@@ -141,7 +142,7 @@ async def _create_archive_async(batch_id: int, force: bool) -> Dict[str, Any]:
     
     async with get_async_session() as session:
         batch = await session.execute(
-            "SELECT * FROM download_batches WHERE id = :batch_id",
+            text("SELECT * FROM download_batches WHERE id = :batch_id"),
             {"batch_id": batch_id}
         )
         batch_row = batch.fetchone()
@@ -180,20 +181,20 @@ async def _cleanup_expired_async() -> Dict[str, Any]:
     cleaned_count = 0
     
     async with get_async_session() as session:
-        expired_batches = await session.execute("""
+        expired_batches = await session.execute(text("""
             SELECT id FROM download_batches 
             WHERE created_at < NOW() - INTERVAL '24 hours'
             AND status = 'completed'
             LIMIT 500
-        """)
+        """))
         
         for batch in expired_batches.fetchall():
             try:
-                await session.execute("""
+                await session.execute(text("""
                     UPDATE download_batches 
                     SET status = 'expired'
                     WHERE id = :batch_id
-                """, {"batch_id": batch.id})
+                """), {"batch_id": batch.id})
                 
                 cleaned_count += 1
                 
@@ -224,7 +225,7 @@ async def _check_status_async(batch_id: int) -> Dict[str, Any]:
     
     async with get_async_session() as session:
         batch = await session.execute(
-            "SELECT * FROM download_batches WHERE id = :batch_id",
+            text("SELECT * FROM download_batches WHERE id = :batch_id"),
             {"batch_id": batch_id}
         )
         batch_row = batch.fetchone()

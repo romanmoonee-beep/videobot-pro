@@ -453,7 +453,7 @@ error_metrics = ErrorMetrics()
 async def setup_error_handlers(dp):
     """Настройка обработчиков ошибок"""
     # Регистрируем middleware
-    dp.message.middleware(ErrorHandlerMiddleware())
+    # dp.message.middleware(ErrorHandlerMiddleware())
     dp.callback_query.middleware(ErrorHandlerMiddleware())
     
     # Регистрируем роутер с обработчиками ошибок

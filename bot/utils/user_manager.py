@@ -8,6 +8,7 @@ from datetime import datetime, timedelta
 from typing import Optional, Dict, Any
 
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy import text
 from shared.models import User, UserType, EventType
 from shared.models.analytics import track_user_event
 from bot.config import bot_config
@@ -38,7 +39,11 @@ async def get_or_create_user(
         Объект пользователя
     """
     # Пытаемся найти существующего пользователя
-    user = await session.get(User, telegram_id)
+    result = await session.execute(
+        text("SELECT * FROM users WHERE telegram_id = :telegram_id"),
+        {'telegram_id': telegram_id}
+    )
+    user = result.first()
     
     if user:
         # Обновляем информацию если она изменилась
