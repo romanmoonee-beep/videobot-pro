@@ -10,6 +10,8 @@ from datetime import datetime
 from aiogram import BaseMiddleware
 from aiogram.types import Message, CallbackQuery, Update, User as TelegramUser
 
+from sqlalchemy import text
+
 from shared.config.database import get_async_session
 from shared.models import User, EventType
 from shared.models.analytics import track_user_event
@@ -120,7 +122,11 @@ class AuthMiddleware(BaseMiddleware):
                     await session.commit()
                 else:
                     # Только получаем существующего пользователя
-                    user = await session.get(User, user_id)
+                    result = await session.execute(
+                        text("SELECT * FROM users WHERE telegram_id = :telegram_id"),
+                        {'telegram_id': user_id}
+                    )
+                    user = result.first()
                 
                 # Кешируем пользователя
                 if user:

@@ -205,7 +205,7 @@ class AnalyticsService:
             
             async with get_async_session() as session:
                 # Основные метрики загрузок
-                download_stats = await session.execute("""
+                download_stats = await session.execute(text("""
                     SELECT 
                         COUNT(*) as total_downloads,
                         COUNT(CASE WHEN status = 'completed' THEN 1 END) as successful_downloads,
@@ -217,12 +217,12 @@ class AnalyticsService:
                         AVG(CASE WHEN processing_time_seconds > 0 THEN processing_time_seconds END) as avg_processing_time
                     FROM download_tasks 
                     WHERE created_at >= :start_date
-                """, {'start_date': start_date})
+                """), {'start_date': start_date})
                 
                 stats = download_stats.fetchone()
                 
                 # Статистика по платформам
-                platform_stats = await session.execute("""
+                platform_stats = await session.execute(text("""
                     SELECT 
                         platform,
                         COUNT(*) as total_downloads,
@@ -233,7 +233,7 @@ class AnalyticsService:
                     WHERE created_at >= :start_date AND platform IS NOT NULL
                     GROUP BY platform
                     ORDER BY total_downloads DESC
-                """, {'start_date': start_date})
+                """), {'start_date': start_date})
                 
                 platform_distribution = {
                     row.platform: {
@@ -303,7 +303,7 @@ class AnalyticsService:
             
             async with get_async_session() as session:
                 # Основные финансовые метрики
-                financial_stats = await session.execute("""
+                financial_stats = await session.execute(text("""
                     SELECT 
                         COUNT(*) as total_payments,
                         COUNT(CASE WHEN status = 'completed' THEN 1 END) as successful_payments,
@@ -312,12 +312,12 @@ class AnalyticsService:
                         COUNT(DISTINCT user_id) as paying_users
                     FROM payments 
                     WHERE created_at >= :start_date
-                """, {'start_date': start_date})
+                """), {'start_date': start_date})
                 
                 stats = financial_stats.fetchone()
                 
                 # Revenue по планам подписки
-                subscription_revenue = await session.execute("""
+                subscription_revenue = await session.execute(text("""
                     SELECT 
                         subscription_plan,
                         COUNT(*) as payments_count,
@@ -327,7 +327,7 @@ class AnalyticsService:
                     WHERE created_at >= :start_date AND status = 'completed'
                     GROUP BY subscription_plan
                     ORDER BY revenue DESC
-                """, {'start_date': start_date})
+                """), {'start_date': start_date})
                 
                 plan_distribution = {
                     row.subscription_plan: {
@@ -388,7 +388,7 @@ class AnalyticsService:
             
             async with get_async_session() as session:
                 # Системные события из analytics_events
-                system_events = await session.execute("""
+                system_events = await session.execute(text("""
                     SELECT 
                         event_type,
                         COUNT(*) as count
@@ -396,7 +396,7 @@ class AnalyticsService:
                     WHERE created_at >= :start_date AND event_category = 'system'
                     GROUP BY event_type
                     ORDER BY count DESC
-                """, {'start_date': start_date})
+                """), {'start_date': start_date})
                 
                 events_distribution = {
                     row.event_type: row.count
@@ -404,14 +404,14 @@ class AnalyticsService:
                 }
                 
                 # Ошибки системы
-                error_stats = await session.execute("""
+                error_stats = await session.execute(text("""
                     SELECT 
                         COUNT(*) as total_errors,
                         COUNT(DISTINCT DATE(created_at)) as error_days
                     FROM analytics_events 
                     WHERE created_at >= :start_date 
                     AND event_type = 'error_occurred'
-                """, {'start_date': start_date})
+                """), {'start_date': start_date})
                 
                 error_data = error_stats.fetchone()
                 
@@ -554,20 +554,36 @@ class AnalyticsService:
     ) -> List[Dict]:
         """Получить динамику регистраций"""
         try:
-            user_filter = "AND telegram_id = :user_id" if user_id else ""
             params = {'start_date': start_date}
             if user_id:
                 params['user_id'] = user_id
-                
-            result = await session.execute(f"""
-                SELECT 
-                    DATE(created_at) as date,
-                    COUNT(*) as registrations
-                FROM users 
-                WHERE created_at >= :start_date {user_filter}
-                GROUP BY DATE(created_at)
-                ORDER BY date
-            """, params)
+
+            if user_id:
+                result = await session.execute(
+                    text(
+                        """
+                        SELECT 
+                            DATE(created_at) as date,
+                            COUNT(*) as registrations
+                        FROM users 
+                        WHERE created_at >= :start_date AND telegram_id = :user_id
+                        GROUP BY DATE(created_at)
+                        ORDER BY date
+                        """
+                    ), params)
+            else:
+                result = await session.execute(
+                    text(
+                        """
+                        SELECT 
+                            DATE(created_at) as date,
+                            COUNT(*) as registrations
+                        FROM users 
+                        WHERE created_at >= :start_date
+                        GROUP BY DATE(created_at)
+                        ORDER BY date
+                        """
+                    ), params)
             
             return [
                 {
@@ -586,21 +602,35 @@ class AnalyticsService:
     ) -> Dict[str, Any]:
         """Получить метрики активности пользователей"""
         try:
-            user_filter = "AND telegram_id = :user_id" if user_id else ""
             params = {'start_date': start_date}
             if user_id:
                 params['user_id'] = user_id
-                
-            # Daily Active Users
-            dau_result = await session.execute(f"""
-                SELECT 
-                    DATE(last_active_at) as date,
-                    COUNT(DISTINCT id) as dau
-                FROM users 
-                WHERE last_active_at >= :start_date {user_filter}
-                GROUP BY DATE(last_active_at)
-                ORDER BY date
-            """, params)
+                # Daily Active Users
+                dau_result = await session.execute(
+                    text(
+                        """
+                        SELECT 
+                            DATE(last_active_at) as date,
+                            COUNT(DISTINCT id) as dau
+                        FROM users 
+                        WHERE last_active_at >= :start_date AND telegram_id = :user_id
+                        GROUP BY DATE(last_active_at)
+                        ORDER BY date
+                        """
+                    ), params)
+            else:
+                dau_result = await session.execute(
+                    text(
+                        """
+                        SELECT 
+                            DATE(last_active_at) as date,
+                            COUNT(DISTINCT id) as dau
+                        FROM users 
+                        WHERE last_active_at >= :start_date
+                        GROUP BY DATE(last_active_at)
+                        ORDER BY date
+                        """
+                    ), params)
             
             dau_data = [
                 {'date': row.date.isoformat(), 'dau': row.dau}
@@ -635,7 +665,7 @@ class AnalyticsService:
     async def _get_download_dynamics(self, session, start_date: datetime) -> List[Dict]:
         """Получить динамику загрузок"""
         try:
-            result = await session.execute("""
+            result = await session.execute(text("""
                 SELECT 
                     DATE(created_at) as date,
                     COUNT(*) as total_downloads,
@@ -645,7 +675,7 @@ class AnalyticsService:
                 WHERE created_at >= :start_date
                 GROUP BY DATE(created_at)
                 ORDER BY date
-            """, {'start_date': start_date})
+            """), {'start_date': start_date})
             
             return [
                 {
@@ -665,7 +695,7 @@ class AnalyticsService:
     async def _get_error_analysis(self, session, start_date: datetime) -> Dict[str, Any]:
         """Анализ ошибок"""
         try:
-            result = await session.execute("""
+            result = await session.execute(text("""
                 SELECT 
                     error_message,
                     COUNT(*) as count
@@ -675,7 +705,7 @@ class AnalyticsService:
                 GROUP BY error_message
                 ORDER BY count DESC
                 LIMIT 10
-            """, {'start_date': start_date})
+            """), {'start_date': start_date})
             
             top_errors = [
                 {'error': row.error_message[:100], 'count': row.count}
@@ -694,7 +724,7 @@ class AnalyticsService:
     async def _get_quality_statistics(self, session, start_date: datetime) -> Dict[str, Any]:
         """Статистика качества"""
         try:
-            result = await session.execute("""
+            result = await session.execute(text("""
                 SELECT 
                     quality,
                     COUNT(*) as count,
@@ -705,7 +735,7 @@ class AnalyticsService:
                 AND quality IS NOT NULL
                 GROUP BY quality
                 ORDER BY count DESC
-            """, {'start_date': start_date})
+            """), {'start_date': start_date})
             
             quality_dist = {
                 row.quality: {
@@ -724,14 +754,14 @@ class AnalyticsService:
     async def _get_batch_analytics(self, session, start_date: datetime) -> Dict[str, Any]:
         """Аналитика batch загрузок"""
         try:
-            result = await session.execute("""
+            result = await session.execute(text("""
                 SELECT 
                     COUNT(*) as total_batches,
                     AVG(total_urls) as avg_batch_size,
                     COUNT(CASE WHEN status = 'completed' THEN 1 END) as completed_batches
                 FROM download_batches 
                 WHERE created_at >= :start_date
-            """, {'start_date': start_date})
+            """), {'start_date': start_date})
             
             stats = result.fetchone()
             
@@ -751,7 +781,7 @@ class AnalyticsService:
     async def _get_revenue_dynamics(self, session, start_date: datetime) -> List[Dict]:
         """Динамика доходов"""
         try:
-            result = await session.execute("""
+            result = await session.execute(text("""
                 SELECT 
                     DATE(completed_at) as date,
                     SUM(amount) as revenue,
@@ -760,7 +790,7 @@ class AnalyticsService:
                 WHERE completed_at >= :start_date AND status = 'completed'
                 GROUP BY DATE(completed_at)
                 ORDER BY date
-            """, {'start_date': start_date})
+            """), {'start_date': start_date})
             
             return [
                 {
@@ -779,14 +809,14 @@ class AnalyticsService:
         """Метрики конверсии"""
         try:
             # Простая реализация - можно расширить
-            trial_to_premium = await session.execute("""
+            trial_to_premium = await session.execute(text("""
                 SELECT 
                     COUNT(DISTINCT u.id) as trial_users,
                     COUNT(DISTINCT CASE WHEN p.status = 'completed' THEN u.id END) as converted_users
                 FROM users u
                 LEFT JOIN payments p ON u.id = p.user_id
                 WHERE u.trial_used = true AND u.created_at >= :start_date
-            """, {'start_date': start_date})
+            """), {'start_date': start_date})
             
             stats = trial_to_premium.fetchone()
             trial_users = stats.trial_users or 0
@@ -807,7 +837,7 @@ class AnalyticsService:
     async def _get_ltv_metrics(self, session, start_date: datetime) -> Dict[str, Any]:
         """Метрики LTV (Lifetime Value)"""
         try:
-            result = await session.execute("""
+            result = await session.execute(text("""
                 SELECT 
                     AVG(total_spent) as avg_ltv,
                     MAX(total_spent) as max_ltv,
@@ -820,7 +850,7 @@ class AnalyticsService:
                     WHERE status = 'completed' AND created_at >= :start_date
                     GROUP BY user_id
                 ) user_totals
-            """, {'start_date': start_date})
+            """), {'start_date': start_date})
             
             stats = result.fetchone()
             
@@ -838,7 +868,7 @@ class AnalyticsService:
         """Получить метрики производительности"""
         try:
             # Получаем данные из аналитических событий
-            result = await session.execute("""
+            result = await session.execute(text("""
                 SELECT 
                     AVG(CAST(event_data->>'response_time' AS FLOAT)) as avg_response_time,
                     MAX(CAST(event_data->>'response_time' AS FLOAT)) as max_response_time,
@@ -846,17 +876,17 @@ class AnalyticsService:
                 FROM analytics_events 
                 WHERE created_at >= :start_date 
                 AND event_data->>'response_time' IS NOT NULL
-            """, {'start_date': start_date})
+            """), {'start_date': start_date})
             
             stats = result.fetchone()
             
             # Медленные запросы
-            slow_requests = await session.execute("""
+            slow_requests = await session.execute(text("""
                 SELECT COUNT(*) as slow_count
                 FROM analytics_events 
                 WHERE created_at >= :start_date 
                 AND event_type = 'slow_request'
-            """, {'start_date': start_date})
+            """), {'start_date': start_date})
             
             slow_stats = slow_requests.fetchone()
             
@@ -878,7 +908,7 @@ class AnalyticsService:
         """Получить метрики нагрузки"""
         try:
             # Загрузка по часам
-            hourly_load = await session.execute("""
+            hourly_load = await session.execute(text("""
                 SELECT 
                     EXTRACT(HOUR FROM created_at) as hour,
                     COUNT(*) as requests_count
@@ -886,7 +916,7 @@ class AnalyticsService:
                 WHERE created_at >= :start_date
                 GROUP BY EXTRACT(HOUR FROM created_at)
                 ORDER BY hour
-            """, {'start_date': start_date})
+            """), {'start_date': start_date})
             
             load_by_hour = [
                 {'hour': int(row.hour), 'requests': row.requests_count}
@@ -936,34 +966,36 @@ class AnalyticsService:
         try:
             async with get_async_session() as session:
                 # Текущая активность (последний час)
-                current_activity = await session.execute("""
+                current_activity = await session.execute(text("""
                     SELECT 
                         COUNT(DISTINCT user_id) as active_users,
                         COUNT(*) as total_events
                     FROM analytics_events 
                     WHERE created_at >= NOW() - INTERVAL '1 HOUR'
-                """)
+                """))
                 
                 activity_stats = current_activity.fetchone()
                 
                 # Активные загрузки
-                active_downloads = await session.execute("""
+                active_downloads = await session.execute(text("""
                     SELECT 
                         COUNT(*) as processing_downloads,
                         COUNT(*) FILTER (WHERE status = 'pending') as pending_downloads
                     FROM download_tasks 
                     WHERE status IN ('processing', 'pending')
-                """)
+                """))
                 
                 download_stats = active_downloads.fetchone()
                 
                 # Системная нагрузка (последние 5 минут)
                 recent_load = await session.execute(
-                    """
-                    SELECT COUNT(*) as recent_requests
-                    FROM analytics_events 
-                    WHERE created_at >= NOW() - INTERVAL '5 MINUTES'
-                    """
+                    text(
+                        """
+                        SELECT COUNT(*) as recent_requests
+                        FROM analytics_events 
+                        WHERE created_at >= NOW() - INTERVAL '5 MINUTES'
+                        """
+                    )
                 )
                 
                 load_stats = recent_load.fetchone()
@@ -1000,7 +1032,7 @@ class AnalyticsService:
         try:
             async with get_async_session() as session:
                 if metric == 'downloads':
-                    query = """
+                    query = text("""
                         SELECT 
                             u.telegram_id,
                             u.username,
@@ -1011,9 +1043,9 @@ class AnalyticsService:
                         WHERE u.downloads_total > 0
                         ORDER BY u.downloads_total DESC
                         LIMIT :limit
-                    """
+                    """)
                 elif metric == 'revenue':
-                    query = """
+                    query = text("""
                         SELECT 
                             u.telegram_id,
                             u.username,
@@ -1026,9 +1058,9 @@ class AnalyticsService:
                         HAVING COALESCE(SUM(p.amount), 0) > 0
                         ORDER BY total_spent DESC
                         LIMIT :limit
-                    """
+                    """)
                 else:  # activity
-                    query = """
+                    query = text("""
                         SELECT 
                             u.telegram_id,
                             u.username,
@@ -1039,7 +1071,7 @@ class AnalyticsService:
                         WHERE u.last_active_at IS NOT NULL
                         ORDER BY u.last_active_at DESC
                         LIMIT :limit
-                    """
+                    """)
                 
                 result = await session.execute(query, {'limit': limit})
                 
